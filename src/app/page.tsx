@@ -77,6 +77,17 @@ function getDownstream(taskId: string, allTasks: AppTask[], visited = new Set<st
   return result;
 }
 
+type AiAction = {
+  type: 'create' | 'update' | 'complete' | 'info';
+  taskId?: string;
+  taskTitle?: string;
+  changes?: Partial<AppTask>;
+  newTask?: Partial<AppTask>;
+  message?: string;
+  reason?: string;
+  cascadeTargets?: { id: string; title: string; oldDeadline: string; newDeadline: string }[];
+};
+
 // ═══════════════════════════════════════════════════
 // MAIN APP
 // ═══════════════════════════════════════════════════
@@ -84,8 +95,9 @@ export default function App() {
   const [tasks, setTasks] = useState<AppTask[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
-  const [syncMode, setSyncMode] = useState(false);
   const [analyzeMode, setAnalyzeMode] = useState(false);
+  const [aiProcessing, setAiProcessing] = useState(false);
+  const [aiActions, setAiActions] = useState<AiAction[] | null>(null);
   const [fCat, setFCat] = useState('all');
   const [fOwn, setFOwn] = useState('all');
   const [dragId, setDragId] = useState<string | null>(null);
@@ -99,6 +111,18 @@ export default function App() {
   const [datePickerPos, setDatePickerPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const [cascadeConfirm, setCascadeConfirm] = useState<{ taskId: string; newDate: string; oldDate: string; downstream: AppTask[]; diffDays: number } | null>(null);
   const cmdRef = useRef<HTMLTextAreaElement>(null);
+
+  // Cmd+K to focus command bar
+  useEffect(() => {
+    const handleGlobalKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        cmdRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKey);
+    return () => window.removeEventListener('keydown', handleGlobalKey);
+  }, []);
 
   // Load collapsed state from localStorage
   useEffect(() => {
@@ -305,23 +329,137 @@ export default function App() {
     up(id, { priority: next });
   };
 
-  // ─── Command bar handlers ───
-  const handleCmdKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      const text = cmdText.trim();
-      if (!text) return;
-      if (text.includes('\n')) {
-        // Multi-line: trigger AI extraction
-        setSyncMode(true);
-        return;
-      }
-      const parsed = parseQuickInput(text);
-      if (parsed.title) {
-        add(parsed);
-        setCmdText('');
+  // ─── AI Command bar handler ───
+  const handleCmdSubmit = async () => {
+    const text = cmdText.trim();
+    if (!text || aiProcessing) return;
+
+    setAiProcessing(true);
+    setAiActions(null);
+
+    try {
+      const existingTasksSummary = tasks.map(t =>
+        `id:"${t.id}" title:"${t.title}" category:${t.category} project:${t.project||'없음'} owner:${t.owner} deadline:${t.deadline||'없음'} status:${t.status} priority:${t.priority} note:"${t.note}" dependsOn:[${t.dependsOn.join(',')}]`
+      ).join('\n');
+
+      const today = todayStr();
+      const dayOfWeek = ['일','월','화','수','목','금','토'][new Date().getDay()];
+
+      const res = await fetch('/api/claude', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system: `You are a PM assistant for Peacer (피서), a shower bomb brand. You manage the team's task timeline.
+
+CURRENT DATE: ${today} (${dayOfWeek}요일), YEAR: 2026
+
+EXISTING TASKS:
+${existingTasksSummary}
+
+CATEGORIES: 제조, 사업자/인허가, 마케팅, 디자인, 계약, 기타
+OWNERS: 풍성, 은채, 공동
+STATUSES: todo, doing, waiting, done
+PRIORITIES: high, medium, low
+
+INSTRUCTIONS:
+The user will send you natural language text — meeting notes, status updates, casual messages, etc.
+Analyze and return a JSON array of actions to take:
+
+[
+  {
+    "type": "update",
+    "taskId": "s12",
+    "taskTitle": "existing task title for display",
+    "changes": { "deadline": "2026-04-19", "status": "waiting", "note": "금요일 발송 예정" },
+    "reason": "brief Korean explanation"
+  },
+  {
+    "type": "create",
+    "newTask": { "title": "새 태스크", "category": "제조", "project": "샘플링", "owner": "풍성", "deadline": "2026-04-20", "status": "todo", "priority": "medium", "note": "" },
+    "reason": "brief Korean explanation"
+  },
+  {
+    "type": "complete",
+    "taskId": "s24",
+    "taskTitle": "existing task title for display",
+    "reason": "brief Korean explanation"
+  },
+  {
+    "type": "info",
+    "message": "Korean response to user's question"
+  }
+]
+
+RULES:
+- MATCH existing tasks by semantic similarity (don't just match exact title)
+- For date keywords: "오늘"=${today}, "내일"=tomorrow, "이번주 금요일"=this Friday, "다음주"=next Monday, etc
+- When updating deadline, also check if task has dependents (dependsOn field) and include cascadeTargets if downstream tasks should shift
+- For cascade: calculate the day difference and shift all downstream tasks by that amount
+- If the text is a question (뭐해야해? 일정 어때? etc), return type:"info" with a helpful PM-style response based on current tasks
+- If the text contains multiple actionable items, return multiple actions
+- Infer category, project, owner from context when possible
+- For note updates on existing tasks, APPEND to existing note (don't replace)
+- Return ONLY the JSON array, no markdown fences, no explanation outside JSON
+- Always respond even if unclear — make your best guess and explain in "reason"`,
+          userMessage: text,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
+
+      let jsonStr = (data.content || [])
+        .filter((b: { type: string }) => b.type === 'text')
+        .map((b: { text: string }) => b.text)
+        .join('')
+        .trim()
+        .replace(/```json\s*/g, '')
+        .replace(/```\s*/g, '')
+        .trim();
+
+      const si = jsonStr.indexOf('[');
+      const ei = jsonStr.lastIndexOf(']');
+      if (si === -1) throw new Error('파싱 실패');
+
+      const actions: AiAction[] = JSON.parse(jsonStr.slice(si, ei + 1));
+      setAiActions(actions);
+    } catch (e: unknown) {
+      setAiActions([{ type: 'info', message: `오류: ${e instanceof Error ? e.message : '알 수 없는 오류'}` }]);
+    }
+    setAiProcessing(false);
+  };
+
+  const applyAiActions = async () => {
+    if (!aiActions) return;
+
+    for (const action of aiActions) {
+      if (action.type === 'create' && action.newTask) {
+        await add(action.newTask);
+      } else if (action.type === 'update' && action.taskId && action.changes) {
+        const changes = { ...action.changes };
+        // Handle note appending
+        if (changes.note) {
+          const existing = tasks.find(t => t.id === action.taskId);
+          if (existing?.note) {
+            changes.note = existing.note + ' | ' + changes.note;
+          }
+        }
+        delete (changes as Record<string, unknown>).deadlineShift;
+        await up(action.taskId, changes);
+
+        // Apply cascade if specified
+        if (action.cascadeTargets) {
+          for (const ct of action.cascadeTargets) {
+            await up(ct.id, { deadline: ct.newDeadline });
+          }
+        }
+      } else if (action.type === 'complete' && action.taskId) {
+        await up(action.taskId, { status: 'done' as AppTask['status'] });
       }
     }
+
+    setAiActions(null);
+    setCmdText('');
   };
 
   // ─── Batch operations ───
@@ -432,35 +570,131 @@ export default function App() {
         </div>
       </header>
 
-      {/* ─── COMMAND BAR (sticky) ─── */}
+      {/* ─── AI COMMAND BAR (sticky) ─── */}
       <div style={S.cmdBar}>
-        <textarea
-          ref={cmdRef}
-          value={cmdText}
-          onChange={(e) => setCmdText(e.target.value)}
-          onKeyDown={handleCmdKeyDown}
-          placeholder="할 일 입력... (예: 몰드 업체 구하기, 오늘, 풍성, 긴급)"
-          rows={1}
-          style={S.cmdInput}
-        />
-        {cmdText.includes('\n') && (
-          <button
-            onClick={() => setSyncMode(true)}
-            style={S.cmdAiBtn}
-          >
-            AI 추출
-          </button>
-        )}
-        {cmdText.trim() && !cmdText.includes('\n') && (
-          <button
-            onClick={() => {
-              const parsed = parseQuickInput(cmdText.trim());
-              if (parsed.title) { add(parsed); setCmdText(''); }
+        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', width: '100%' }}>
+          <textarea
+            ref={cmdRef}
+            value={cmdText}
+            onChange={(e) => setCmdText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleCmdSubmit();
+              }
             }}
-            style={S.cmdAddBtn}
+            placeholder="무엇이든 입력하세요 — 회의록, 상황 업데이트, 질문 등 (Enter로 전송)"
+            rows={1}
+            style={{
+              ...S.cmdInput,
+              minHeight: cmdText.includes('\n') ? 60 : 36,
+            }}
+          />
+          <button
+            onClick={handleCmdSubmit}
+            disabled={!cmdText.trim() || aiProcessing}
+            style={{
+              ...S.cmdAddBtn,
+              opacity: !cmdText.trim() || aiProcessing ? 0.5 : 1,
+              minWidth: 56,
+            }}
           >
-            추가
+            {aiProcessing ? '⏳' : '전송'}
           </button>
+        </div>
+
+        {/* AI Processing indicator */}
+        {aiProcessing && (
+          <div style={{ padding: '8px 12px', fontSize: 12, color: '#5F4B82', background: '#EFEBFA', borderRadius: 2, marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ animation: 'fadeUp .6s ease-in-out infinite alternate' }}>🤖</span>
+            AI가 분석 중입니다...
+          </div>
+        )}
+
+        {/* AI Actions Preview */}
+        {aiActions && aiActions.length > 0 && (
+          <div style={{ marginTop: 8, border: '1px solid #A896C4', borderRadius: 2, background: '#FDFBF7', overflow: 'hidden' }}>
+            <div style={{ padding: '10px 14px', background: '#EFEBFA', borderBottom: '1px solid #A896C4', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13, color: '#5F4B82' }}>
+                🤖 이렇게 반영할게요
+              </span>
+              <button onClick={() => setAiActions(null)} style={{ background: 'none', border: 'none', color: '#8A7D72', fontSize: 16, cursor: 'pointer', padding: 0 }}>×</button>
+            </div>
+            <div style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 300, overflowY: 'auto' }}>
+              {aiActions.map((action, i) => (
+                <div key={i} style={{
+                  padding: '8px 10px',
+                  borderLeft: `3px solid ${
+                    action.type === 'create' ? '#A8C496' :
+                    action.type === 'update' ? '#5F4B82' :
+                    action.type === 'complete' ? '#A8C496' :
+                    '#DDD3C2'
+                  }`,
+                  background: action.type === 'info' ? '#FAF6EF' : '#fff',
+                  borderRadius: 2,
+                  fontSize: 12,
+                }}>
+                  {action.type === 'create' && (
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                        <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 100, background: '#EBF3E6', color: '#3E5A2E', fontWeight: 500 }}>새로 만들기</span>
+                        <span style={{ fontWeight: 400 }}>{action.newTask?.title}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: '#8A7D72' }}>
+                        {action.newTask?.category} · {action.newTask?.owner || '공동'} · {action.newTask?.deadline ? fD(action.newTask.deadline) : '마감일 없음'} · {action.newTask?.priority === 'high' ? '🔴 긴급' : action.newTask?.priority || 'medium'}
+                      </div>
+                      {action.reason && <div style={{ fontSize: 10, color: '#5F4B82', marginTop: 2, fontStyle: 'italic' }}>{action.reason}</div>}
+                    </div>
+                  )}
+                  {action.type === 'update' && (
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                        <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 100, background: '#EFEBFA', color: '#5F4B82', fontWeight: 500 }}>수정</span>
+                        <span style={{ fontWeight: 400 }}>{action.taskTitle || action.taskId}</span>
+                      </div>
+                      <div style={{ fontSize: 10, color: '#8A7D72' }}>
+                        {action.changes && Object.entries(action.changes).filter(([k]) => k !== 'deadlineShift').map(([k, v]) => {
+                          const labels: Record<string, string> = { deadline: '마감일', status: '상태', priority: '우선순위', owner: '담당', note: '메모', category: '카테고리', project: '프로젝트' };
+                          const val = k === 'status' ? SL[v as string] || v : k === 'deadline' ? fD(v as string) : v;
+                          return `${labels[k] || k}: ${val}`;
+                        }).join(' · ')}
+                      </div>
+                      {action.cascadeTargets && action.cascadeTargets.length > 0 && (
+                        <div style={{ marginTop: 4, padding: '4px 8px', background: '#FEF5F3', borderRadius: 2, fontSize: 10, color: '#B84848' }}>
+                          ⚠ 연쇄 이동: {action.cascadeTargets.map(ct => `${ct.title} ${fD(ct.oldDeadline)}→${fD(ct.newDeadline)}`).join(', ')}
+                        </div>
+                      )}
+                      {action.reason && <div style={{ fontSize: 10, color: '#5F4B82', marginTop: 2, fontStyle: 'italic' }}>{action.reason}</div>}
+                    </div>
+                  )}
+                  {action.type === 'complete' && (
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 100, background: '#EBF3E6', color: '#3E5A2E', fontWeight: 500 }}>✓ 완료</span>
+                        <span style={{ fontWeight: 400 }}>{action.taskTitle || action.taskId}</span>
+                      </div>
+                      {action.reason && <div style={{ fontSize: 10, color: '#5F4B82', marginTop: 2, fontStyle: 'italic' }}>{action.reason}</div>}
+                    </div>
+                  )}
+                  {action.type === 'info' && (
+                    <div style={{ color: '#4A3F38', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
+                      {action.message}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            {aiActions.some(a => a.type !== 'info') && (
+              <div style={{ padding: '8px 14px', borderTop: '1px solid #E8DFCE', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button onClick={() => setAiActions(null)} style={{ padding: '6px 14px', background: 'transparent', border: '1px solid #DDD3C2', color: '#8A7D72', borderRadius: 2, fontSize: 11, cursor: 'pointer' }}>
+                  취소
+                </button>
+                <button onClick={applyAiActions} style={{ padding: '6px 18px', background: '#5F4B82', border: 'none', color: '#FAF6EF', borderRadius: 2, fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>
+                  ✓ 반영하기
+                </button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -684,15 +918,6 @@ export default function App() {
           onSave={(t) => { up(editId, t); setEditId(null); }}
           onDelete={() => { del(editId); setEditId(null); }}
           allTasks={tasks}
-        />
-      )}
-      {syncMode && (
-        <SyncModal
-          onClose={() => setSyncMode(false)}
-          onAdd={(arr) => { addBatch(arr); setSyncMode(false); }}
-          existing={tasks}
-          initialText={cmdText.includes('\n') ? cmdText : ''}
-          onDone={() => setCmdText('')}
         />
       )}
       {analyzeMode && (
