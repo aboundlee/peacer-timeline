@@ -110,19 +110,58 @@ export default function App() {
   const [datePickerId, setDatePickerId] = useState<string | null>(null);
   const [datePickerPos, setDatePickerPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const [cascadeConfirm, setCascadeConfirm] = useState<{ taskId: string; newDate: string; oldDate: string; downstream: AppTask[]; diffDays: number } | null>(null);
+  const [undoStack, setUndoStack] = useState<{ id: string; prev: Partial<AppTask>; label: string }[]>([]);
+  const [toast, setToast] = useState<{ message: string; undoAction?: () => void } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cmdRef = useRef<HTMLTextAreaElement>(null);
 
-  // Cmd+K to focus command bar
+  // Show toast with optional undo
+  const showToast = useCallback((message: string, undoAction?: () => void) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ message, undoAction });
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
+  }, []);
+
+  // Undo last action
+  const undo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const last = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+    up(last.id, last.prev);
+    showToast(`되돌림: ${last.label}`);
+  }, [undoStack, showToast]);
+
+  // Tracked update — saves undo history
+  const upWithUndo = (id: string, updates: Partial<AppTask>, label: string) => {
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+    // Save previous values for undo
+    const prev: Partial<AppTask> = {};
+    for (const key of Object.keys(updates)) {
+      (prev as Record<string, unknown>)[key] = (task as Record<string, unknown>)[key];
+    }
+    setUndoStack((stack) => [...stack.slice(-19), { id, prev, label }]);
+    up(id, updates);
+  };
+
+  // Cmd+K to focus command bar, Cmd+Z to undo
   useEffect(() => {
     const handleGlobalKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault();
         cmdRef.current?.focus();
       }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+        // Only undo if not in a text input
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        e.preventDefault();
+        undo();
+      }
     };
     window.addEventListener('keydown', handleGlobalKey);
     return () => window.removeEventListener('keydown', handleGlobalKey);
-  }, []);
+  }, [undo]);
 
   // Load collapsed state from localStorage
   useEffect(() => {
@@ -307,9 +346,22 @@ export default function App() {
   const cycleStatus = (id: string) => {
     const task = tasks.find((t) => t.id === id);
     if (!task) return;
-    const idx = STS.indexOf(task.status as typeof STS[number]);
-    const next = STS[(idx + 1) % STS.length];
-    up(id, { status: next as AppTask['status'] });
+    // Cycle: todo → doing → waiting → todo (done은 별도)
+    const activeCycle: (typeof STS[number])[] = ['todo', 'doing', 'waiting'];
+    const idx = activeCycle.indexOf(task.status as typeof STS[number]);
+    const next = idx >= 0 ? activeCycle[(idx + 1) % activeCycle.length] : 'todo';
+    upWithUndo(id, { status: next as AppTask['status'] }, `"${task.title}" ${SL[task.status]} → ${SL[next]}`);
+    showToast(`${SL[next]}으로 변경: ${task.title}`);
+  };
+
+  const markDone = (id: string) => {
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+    upWithUndo(id, { status: 'done' as AppTask['status'] }, `"${task.title}" 완료 처리`);
+    showToast(`✓ 완료: ${task.title}`, () => {
+      // undo callback
+      undo();
+    });
   };
 
   const cycleOwner = (id: string) => {
@@ -317,7 +369,7 @@ export default function App() {
     if (!task) return;
     const idx = OWNERS.indexOf(task.owner);
     const next = OWNERS[(idx + 1) % OWNERS.length];
-    up(id, { owner: next });
+    upWithUndo(id, { owner: next }, `"${task.title}" 담당 ${task.owner} → ${next}`);
   };
 
   const cyclePriority = (id: string) => {
@@ -326,7 +378,7 @@ export default function App() {
     const order: AppTask['priority'][] = ['medium', 'high', 'low'];
     const idx = order.indexOf(task.priority as AppTask['priority']);
     const next = order[(idx + 1) % order.length];
-    up(id, { priority: next });
+    upWithUndo(id, { priority: next }, `"${task.title}" 우선순위 변경`);
   };
 
   // ─── AI Command bar handler ───
@@ -758,6 +810,7 @@ RULES:
                 onCycleStatus={() => cycleStatus(t.id)}
                 onCycleOwner={() => cycleOwner(t.id)}
                 onCyclePriority={() => cyclePriority(t.id)}
+                onMarkDone={() => markDone(t.id)}
                 onDateClick={(e) => { setDatePickerId(t.id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
                 extra={<span style={S.critChain}>{t.blocksCount}개 차단</span>}
               />
@@ -790,6 +843,7 @@ RULES:
                     onCycleStatus={() => cycleStatus(t.id)}
                     onCycleOwner={() => cycleOwner(t.id)}
                     onCyclePriority={() => cyclePriority(t.id)}
+                    onMarkDone={() => markDone(t.id)}
                     onDateClick={(e) => { setDatePickerId(t.id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
                   />
                 ))}
@@ -823,6 +877,7 @@ RULES:
           onCycleStatus={cycleStatus}
           onCycleOwner={cycleOwner}
           onCyclePriority={cyclePriority}
+          onMarkDone={markDone}
           onDateClick={(id, e) => { setDatePickerId(id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
         />
       </CollapsibleSection>
@@ -842,6 +897,7 @@ RULES:
           onCycleStatus={cycleStatus}
           onCycleOwner={cycleOwner}
           onCyclePriority={cyclePriority}
+          onMarkDone={markDone}
           onDateClick={(id, e) => { setDatePickerId(id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
           dragId={dragId}
           dragCol={dragCol}
@@ -928,10 +984,39 @@ RULES:
         />
       )}
 
+      {/* ─── TOAST ─── */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          background: '#1A1613', color: '#FAF6EF', padding: '10px 18px',
+          borderRadius: 2, fontSize: 12, fontWeight: 400, zIndex: 2000,
+          display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 4px 20px rgba(0,0,0,.25)',
+          animation: 'fadeUp .2s ease-out',
+        }}>
+          <span>{toast.message}</span>
+          {toast.undoAction && (
+            <button onClick={() => { toast.undoAction!(); setToast(null); }} style={{
+              background: 'transparent', border: '1px solid #FAF6EF55', color: '#FAF6EF',
+              padding: '3px 10px', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontWeight: 500,
+            }}>
+              되돌리기
+            </button>
+          )}
+          {!toast.undoAction && undoStack.length > 0 && (
+            <button onClick={() => { undo(); setToast(null); }} style={{
+              background: 'transparent', border: '1px solid #FAF6EF55', color: '#FAF6EF',
+              padding: '3px 10px', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontWeight: 500,
+            }}>
+              Cmd+Z 되돌리기
+            </button>
+          )}
+        </div>
+      )}
+
       <footer style={S.footer}>
         <span>PEACER</span>
         <button onClick={() => { if (confirm('새로고침?')) fetchTasks(); }} style={S.fLink}>새로고침</button>
-        <span style={{ marginLeft: 'auto', opacity: 0.5 }}>v7</span>
+        <span style={{ marginLeft: 'auto', opacity: 0.5 }}>v7.1</span>
       </footer>
     </div>
   );
@@ -941,7 +1026,7 @@ RULES:
 // TASK CARD — unified card component with inline toggles
 // ═══════════════════════════════════════════════════
 function TaskCard({
-  t, compact, selectMode, selected, onSelect, onEdit, onCycleStatus, onCycleOwner, onCyclePriority, onDateClick, extra,
+  t, compact, selectMode, selected, onSelect, onEdit, onCycleStatus, onCycleOwner, onCyclePriority, onMarkDone, onDateClick, extra,
 }: {
   t: AppTask;
   compact?: boolean;
@@ -952,6 +1037,7 @@ function TaskCard({
   onCycleStatus: () => void;
   onCycleOwner: () => void;
   onCyclePriority: () => void;
+  onMarkDone: () => void;
   onDateClick: (e: React.MouseEvent) => void;
   extra?: React.ReactNode;
 }) {
@@ -1048,20 +1134,37 @@ function TaskCard({
             날짜 없음
           </span>
         )}
-        <span
-          onClick={handleStatusClick}
-          style={{
-            ...S.stBadge,
-            background: SC[t.status]?.bg,
-            color: SC[t.status]?.tx,
-            border: `1px solid ${SC[t.status]?.bd}`,
-            cursor: 'pointer',
-            transition: 'all .15s',
-            transform: flash === 'status' ? 'scale(1.15)' : 'scale(1)',
-          }}
-        >
-          {SL[t.status]}
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
+          <span
+            onClick={handleStatusClick}
+            style={{
+              ...S.stBadge,
+              background: SC[t.status]?.bg,
+              color: SC[t.status]?.tx,
+              border: `1px solid ${SC[t.status]?.bd}`,
+              cursor: 'pointer',
+              transition: 'all .15s',
+              transform: flash === 'status' ? 'scale(1.15)' : 'scale(1)',
+            }}
+          >
+            {SL[t.status]}
+          </span>
+          {t.status !== 'done' && (
+            <span
+              onClick={(e) => { e.stopPropagation(); onMarkDone(); }}
+              style={{
+                width: 18, height: 18, borderRadius: 2,
+                border: '1.5px solid #A8C496', background: 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', fontSize: 10, color: '#A8C496',
+                transition: 'all .15s',
+              }}
+              title="완료 처리"
+            >
+              ✓
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1327,7 +1430,7 @@ function DatePicker({
 // PROJECT PROGRESS
 // ═══════════════════════════════════════════════════
 function ProjectProgress({
-  tasks, allTasks, selectMode, selectedIds, onSelect, onEdit, onCycleStatus, onCycleOwner, onCyclePriority, onDateClick,
+  tasks, allTasks, selectMode, selectedIds, onSelect, onEdit, onCycleStatus, onCycleOwner, onCyclePriority, onMarkDone, onDateClick,
 }: {
   tasks: AppTask[];
   allTasks: AppTask[];
@@ -1338,6 +1441,7 @@ function ProjectProgress({
   onCycleStatus: (id: string) => void;
   onCycleOwner: (id: string) => void;
   onCyclePriority: (id: string) => void;
+  onMarkDone: (id: string) => void;
   onDateClick: (id: string, e: React.MouseEvent) => void;
 }) {
   const tree: Record<string, Record<string, AppTask[]>> = {};
@@ -1451,7 +1555,7 @@ function ProjectProgress({
 // BOARD VIEW
 // ═══════════════════════════════════════════════════
 function BoardView({
-  tasks, selectMode, selectedIds, onSelect, onEdit, onCycleStatus, onCycleOwner, onCyclePriority, onDateClick, dragId, dragCol, onDS, onDO, onDD, onDE,
+  tasks, selectMode, selectedIds, onSelect, onEdit, onCycleStatus, onCycleOwner, onCyclePriority, onMarkDone, onDateClick, dragId, dragCol, onDS, onDO, onDD, onDE,
 }: {
   tasks: AppTask[];
   selectMode: boolean;
@@ -1461,6 +1565,7 @@ function BoardView({
   onCycleStatus: (id: string) => void;
   onCycleOwner: (id: string) => void;
   onCyclePriority: (id: string) => void;
+  onMarkDone: (id: string) => void;
   onDateClick: (id: string, e: React.MouseEvent) => void;
   dragId: string | null;
   dragCol: string | null;
@@ -1552,12 +1657,21 @@ function BoardView({
                           +날짜
                         </span>
                       )}
-                      <span
-                        onClick={(e) => { e.stopPropagation(); onCycleStatus(t.id); }}
-                        style={{ ...S.stBadge, background: SC[t.status]?.bg, color: SC[t.status]?.tx, border: `1px solid ${SC[t.status]?.bd}`, cursor: 'pointer' }}
-                      >
-                        {SL[t.status]}
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
+                        <span
+                          onClick={(e) => { e.stopPropagation(); onCycleStatus(t.id); }}
+                          style={{ ...S.stBadge, background: SC[t.status]?.bg, color: SC[t.status]?.tx, border: `1px solid ${SC[t.status]?.bd}`, cursor: 'pointer' }}
+                        >
+                          {SL[t.status]}
+                        </span>
+                        {t.status !== 'done' && (
+                          <span
+                            onClick={(e) => { e.stopPropagation(); onMarkDone(t.id); }}
+                            style={{ width: 16, height: 16, borderRadius: 2, border: '1.5px solid #A8C496', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 9, color: '#A8C496' }}
+                            title="완료"
+                          >✓</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
