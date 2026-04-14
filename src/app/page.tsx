@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase, dbToApp, appToDb } from '@/lib/supabase';
-import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, dU, fD, uid } from '@/lib/constants';
+import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, PROJECT_META, dU, fD, uid } from '@/lib/constants';
 import { calcCriticalPath, AppTask } from '@/lib/criticalPath';
 
 // ═══════════════════════════════════════════════════
@@ -589,10 +589,47 @@ export default function App() {
         </div>
       </div>
 
+      {/* ─── GOAL HEALTH BANNER ─── */}
+      <div style={{ background: 'linear-gradient(135deg, #FAF6EF, #F0E9DB)', border: '1px solid #DDD3C2', borderRadius: 2, padding: '14px 18px', marginBottom: 12, margin: '0 14px 12px' }}>
+        <div style={{ fontFamily: "'DM Serif Display',serif", fontSize: 11, letterSpacing: '.2em', color: '#5F4B82', marginBottom: 8 }}>OUR GOAL</div>
+        <div style={{ fontSize: 15, fontWeight: 400, color: '#1A1613', marginBottom: 12 }}>{OKR.objective}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {OKR.krs.map((kr, i) => {
+            const relatedProjects = Object.entries(PROJECT_META).filter(([, m]) => m.kr === kr);
+            const relatedTasks = relatedProjects.flatMap(([pName]) => tasks.filter(t => t.project === pName));
+            const total = relatedTasks.length;
+            const done = relatedTasks.filter(t => t.status === 'done').length;
+            const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+            const hasOverdue = relatedTasks.some(t => t.deadline && t.status !== 'done' && dU(t.deadline) < 0);
+            const hasBlocker = relatedTasks.some(t => {
+              const enrichedTask = enriched.find(e => e.id === t.id);
+              return enrichedTask && (enrichedTask.blocksCount || 0) > 0 && enrichedTask.status !== 'done';
+            });
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 12, color: hasOverdue ? '#B84848' : hasBlocker ? '#8B5A3C' : '#8A7D72', minWidth: 14 }}>
+                  {hasOverdue ? '🔴' : hasBlocker ? '🟡' : pct === 100 ? '🟢' : '⚪'}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, color: '#4A3F38', marginBottom: 2 }}>{kr}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ flex: 1, height: 3, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
+                      <div style={{ width: `${pct}%`, height: '100%', background: hasOverdue ? '#B84848' : pct === 100 ? '#A8C496' : '#5F4B82', borderRadius: 100, transition: 'width .5s' }} />
+                    </div>
+                    <span style={{ fontSize: 10, color: '#8A7D72', minWidth: 36 }}>{done}/{total}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {/* ─── SECTION 1: 풍성의 오늘 ─── */}
       <PersonSection
         owner="풍성"
         tasks={psTasks}
+        allTasks={tasks}
         selectMode={selectMode}
         selectedIds={selectedIds}
         onSelect={toggleSelect}
@@ -609,6 +646,7 @@ export default function App() {
       <PersonSection
         owner="은채"
         tasks={ecTasks}
+        allTasks={tasks}
         selectMode={selectMode}
         selectedIds={selectedIds}
         onSelect={toggleSelect}
@@ -804,10 +842,11 @@ export default function App() {
 // PERSON SECTION — "풍성의 오늘" / "은채의 오늘"
 // ═══════════════════════════════════════════════════
 function PersonSection({
-  owner, tasks: personTasks, selectMode, selectedIds, onSelect, onEdit, onCycleStatus, onCycleOwner, onCyclePriority, onMarkDone, onDateClick, todayDate,
+  owner, tasks: personTasks, allTasks, selectMode, selectedIds, onSelect, onEdit, onCycleStatus, onCycleOwner, onCyclePriority, onMarkDone, onDateClick, todayDate,
 }: {
   owner: string;
   tasks: AppTask[];
+  allTasks: AppTask[];
   selectMode: boolean;
   selectedIds: Set<string>;
   onSelect: (id: string) => void;
@@ -873,6 +912,29 @@ function PersonSection({
           ))}
         </div>
       )}
+
+      {/* This person's upcoming this week */}
+      {(() => {
+        const upcoming = allTasks.filter(t => {
+          if (t.status === 'done') return false;
+          if (t.owner !== owner) return false;
+          if (!t.deadline) return false;
+          const d = dU(t.deadline);
+          return d > 0 && d <= 6;
+        }).sort((a, b) => dU(a.deadline) - dU(b.deadline));
+        if (upcoming.length === 0) return null;
+        return (
+          <div style={{ marginTop: 6, padding: '6px 10px', background: '#FDFBF7', borderRadius: 2, border: '1px solid #EFE7D6' }}>
+            <div style={{ fontSize: 10, color: '#8A7D72', marginBottom: 4, fontStyle: 'italic' }}>이번 주 남은 것</div>
+            {upcoming.map(t => (
+              <div key={t.id} style={{ fontSize: 11, color: '#4A3F38', padding: '2px 0', display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ color: '#8A7D72', fontSize: 10, minWidth: 28 }}>{fD(t.deadline)}</span>
+                <span>{t.title}</span>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -937,7 +999,10 @@ function PersonTaskCard({
         >
           {t.priority === 'high' ? '🔴' : t.priority === 'low' ? '🔵' : '⚪'}
         </span>
-        <span style={{ fontSize: 13, fontWeight: 400, flex: 1, lineHeight: 1.3 }}>{t.title}</span>
+        <span style={{ fontSize: 13, fontWeight: 400, flex: 1, lineHeight: 1.3 }}>
+          {t.title}
+          {t.note && <div style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic', marginTop: 1, lineHeight: 1.3 }}>{t.note}</div>}
+        </span>
         {t.project && (
           <span style={{
             fontSize: 9, padding: '1px 6px', borderRadius: 100,
@@ -1192,7 +1257,7 @@ function ProjectCards({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {projects.map((proj) => {
-        const emoji = catEmoji[proj.category] || '📌';
+        const emoji = PROJECT_META[proj.name]?.emoji || catEmoji[proj.category] || '📌';
         const pct = proj.total > 0 ? Math.round((proj.done / proj.total) * 100) : 0;
         const oc = ownerColors[proj.primaryOwner] || ownerColors['공동'];
         const isExpanded = expandedProjects.has(proj.name);
@@ -1214,6 +1279,11 @@ function ProjectCards({
               <span style={{ fontSize: 14 }}>{emoji}</span>
               <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13, flex: 1 }}>
                 {proj.name}
+                {PROJECT_META[proj.name]?.goal && (
+                  <div style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic', marginTop: 1 }}>
+                    🎯 {PROJECT_META[proj.name].goal}
+                  </div>
+                )}
               </span>
               {proj.isNew && (
                 <span style={{
