@@ -894,10 +894,10 @@ function DashboardView({
         className="dash-row"
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
-          padding: '8px 12px', borderRadius: 8,
+          padding: '6px 12px', borderRadius: 6,
           borderLeft: `2px solid ${isDone ? '#5F4B8233' : isOverdue ? '#B84848' : '#E8DFCE'}`,
           opacity: isDone ? 0.45 : 1,
-          minHeight: 40,
+          minHeight: 32,
         }}
       >
         <span
@@ -1095,9 +1095,9 @@ function DashboardView({
                       onClick={() => onEdit(t.id)}
                       className="dash-row"
                       style={{
-                        padding: '8px 12px', cursor: 'pointer', borderRadius: 8,
+                        padding: '6px 12px', cursor: 'pointer', borderRadius: 6,
                         display: 'flex', alignItems: 'center', gap: 8,
-                        minHeight: 40,
+                        minHeight: 32,
                       }}
                     >
                       <span
@@ -1209,8 +1209,8 @@ function DashboardView({
                         className="dash-row"
                         style={{
                           display: 'flex', alignItems: 'center', gap: 12,
-                          padding: '12px 16px', cursor: 'pointer', borderRadius: 8,
-                          minHeight: 44,
+                          padding: '8px 16px', cursor: 'pointer', borderRadius: 6,
+                          minHeight: 36,
                         }}
                       >
                         <span style={{
