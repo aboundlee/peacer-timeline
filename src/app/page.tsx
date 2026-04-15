@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase, dbToApp, appToDb } from '@/lib/supabase';
-import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, PROJECT_META, TRACKS, dU, fD, uid, type Phase } from '@/lib/constants';
+import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, PROJECT_META, TRACKS, CUSTOMER_GOAL, dU, fD, uid, type Phase } from '@/lib/constants';
 import { calcCriticalPath, AppTask } from '@/lib/criticalPath';
 
 // ═══════════════════════════════════════════════════
@@ -106,6 +106,10 @@ export default function App() {
   const [selectMode, setSelectMode] = useState(false);
   const [datePickerId, setDatePickerId] = useState<string | null>(null);
   const [datePickerPos, setDatePickerPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const [ownerPickerId, setOwnerPickerId] = useState<string | null>(null);
+  const [ownerPickerPos, setOwnerPickerPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const [addingNew, setAddingNew] = useState(false);
+  const [customerCount, setCustomerCount] = useState(0);
   const [cascadeConfirm, setCascadeConfirm] = useState<{ taskId: string; newDate: string; oldDate: string; downstream: AppTask[]; diffDays: number } | null>(null);
   const [undoStack, setUndoStack] = useState<{ id: string; prev: Partial<AppTask>; label: string; at: number }[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -182,6 +186,18 @@ export default function App() {
       setUnlocked(true);
     }
   }, []);
+
+  // Customer count (persisted locally — no DB schema yet)
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem('peacer-customer-count');
+      if (v) setCustomerCount(parseInt(v) || 0);
+    } catch { /* ignore */ }
+  }, []);
+  const updateCustomerCount = (n: number) => {
+    setCustomerCount(n);
+    try { localStorage.setItem('peacer-customer-count', String(n)); } catch { /* ignore */ }
+  };
 
   const tryUnlock = () => {
     if (passInput === '5317') {
@@ -394,6 +410,18 @@ export default function App() {
     const idx = OWNERS.indexOf(task.owner);
     const next = OWNERS[(idx + 1) % OWNERS.length];
     upWithUndo(id, { owner: next }, `"${task.title}" 담당 ${task.owner} → ${next}`);
+  };
+
+  const setOwner = (id: string, owner: string) => {
+    const task = tasks.find((t) => t.id === id);
+    if (!task || task.owner === owner) return;
+    upWithUndo(id, { owner }, `"${task.title}" 담당 ${task.owner} → ${owner}`);
+  };
+
+  const openOwnerPicker = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setOwnerPickerId(id);
+    setOwnerPickerPos({ top: e.clientY, left: e.clientX });
   };
 
   const cyclePriority = (id: string) => {
@@ -610,7 +638,10 @@ export default function App() {
         onMarkDone={markDone}
         onDateClick={(id, e) => { setDatePickerId(id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
         onCycleOwner={cycleOwner}
-        onAdd={add}
+        onOwnerPick={openOwnerPicker}
+        onAddNew={() => setAddingNew(true)}
+        customerCount={customerCount}
+        onUpdateCustomerCount={updateCustomerCount}
       />
 
       {/* ─── SECTION: 이번 주 ─── */}
@@ -725,6 +756,16 @@ export default function App() {
         </div>
       )}
 
+      {/* ─── OWNER PICKER POPUP ─── */}
+      {ownerPickerId && (
+        <OwnerPicker
+          currentOwner={tasks.find((t) => t.id === ownerPickerId)?.owner || ''}
+          pos={ownerPickerPos}
+          onClose={() => setOwnerPickerId(null)}
+          onPick={(owner) => { setOwner(ownerPickerId, owner); setOwnerPickerId(null); }}
+        />
+      )}
+
       {/* ─── EDITOR MODAL ─── */}
       {editId && (
         <Editor
@@ -732,6 +773,15 @@ export default function App() {
           onClose={() => setEditId(null)}
           onSave={(t) => { up(editId, t); setEditId(null); }}
           onDelete={() => { del(editId); setEditId(null); }}
+          allTasks={tasks}
+        />
+      )}
+
+      {/* ─── ADD-NEW MODAL ─── */}
+      {addingNew && (
+        <Editor
+          onClose={() => setAddingNew(false)}
+          onSave={(t) => { add(t); setAddingNew(false); }}
           allTasks={tasks}
         />
       )}
@@ -863,7 +913,8 @@ export default function App() {
 // ═══════════════════════════════════════════════════
 function DashboardView({
   tasks, enriched, todayDate,
-  onEdit, onChangeStatus, onMarkDone, onDateClick, onCycleOwner, onAdd,
+  onEdit, onChangeStatus, onMarkDone, onDateClick, onCycleOwner, onOwnerPick, onAddNew,
+  customerCount, onUpdateCustomerCount,
 }: {
   tasks: AppTask[];
   enriched: AppTask[];
@@ -873,19 +924,20 @@ function DashboardView({
   onMarkDone: (id: string) => void;
   onDateClick: (id: string, e: React.MouseEvent) => void;
   onCycleOwner: (id: string) => void;
-  onAdd: (t: Partial<AppTask>) => void;
+  onOwnerPick: (id: string, e: React.MouseEvent) => void;
+  onAddNew: () => void;
+  customerCount: number;
+  onUpdateCustomerCount: (n: number) => void;
 }) {
-  const [openTracks, setOpenTracks] = useState<Set<string>>(new Set());
+  void onCycleOwner;
+  const [openTracks, setOpenTracks] = useState<Set<string>>(() => new Set(['제품', '운영', '마케팅']));
   const [openPhases, setOpenPhases] = useState<Set<string>>(new Set());
-  const [quickInput, setQuickInput] = useState('');
 
-  const handleQuickAdd = () => {
-    const raw = quickInput.trim();
-    if (!raw) return;
-    const parsed = parseQuickInput(raw);
-    if (!parsed.title) return;
-    onAdd(parsed);
-    setQuickInput('');
+  const handleEditCustomerCount = () => {
+    const v = window.prompt('현재 고객 수', String(customerCount));
+    if (v == null) return;
+    const n = parseInt(v);
+    if (Number.isFinite(n) && n >= 0) onUpdateCustomerCount(n);
   };
 
   const toggleTrack = (name: string) => {
@@ -1159,7 +1211,7 @@ function DashboardView({
           >{fD(t.deadline)}</span>
         )}
         <span
-          onClick={() => onCycleOwner(t.id)}
+          onClick={(e) => { e.stopPropagation(); onOwnerPick(t.id, e); }}
           style={{
             fontSize: 10, padding: '2px 8px', borderRadius: 100, cursor: 'pointer',
             background: ownerColors[t.owner]?.bg || ownerColors['공동'].bg,
@@ -1230,30 +1282,37 @@ function DashboardView({
             background: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#F04452' : '#3182F6',
           }} />
         </div>
-        {/* Secondary row — velocity (demoted: output, not outcome) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', marginTop: 10, paddingTop: 10, borderTop: '1px solid #F2F4F6' }}>
-          <span style={{ fontSize: 10, fontWeight: 600, color: '#B0B8C1', letterSpacing: '.04em' }}>VELOCITY</span>
-          <span style={{ fontSize: 11, color: '#8B95A1' }}>
-            어제 <span style={{ color: '#4E5968', fontWeight: 600 }}>{data.yesterdayDone}</span>
-            {data.yesterdayDone > 0 && ` · ${Object.entries(data.yesterdayByOwner).map(([o, n]) => `${o} ${n}`).join(', ')}`}
-          </span>
-          <span style={{ fontSize: 11, color: '#8B95A1' }}>
-            이번 주 <span style={{ color: '#4E5968', fontWeight: 600 }}>{data.thisWeekDone}</span>
-            {data.weekDelta !== 0 && (
-              <span style={{
-                marginLeft: 4, fontWeight: 500,
-                color: data.weekDelta > 0 ? '#22C55E' : '#F04452',
-                display: 'inline-flex', alignItems: 'center', gap: 2,
-              }}>
-                <svg width="8" height="8" viewBox="0 0 10 10" fill="none" style={{ transform: data.weekDelta > 0 ? 'rotate(0deg)' : 'rotate(180deg)' }}>
-                  <path d="M5 2L8 6H2L5 2Z" fill="currentColor" />
-                </svg>
-                {Math.abs(data.weekDelta)}
-              </span>
-            )}
-          </span>
-        </div>
       </div>
+
+      {/* ═══ Customer Goal — 5/30까지 500명 ═══ */}
+      {(() => {
+        const cgPct = Math.min(100, Math.round((customerCount / CUSTOMER_GOAL.target) * 100));
+        const cgDays = dU(CUSTOMER_GOAL.deadline);
+        return (
+          <div style={{ background: '#FFFFFF', border: '1px solid #E5E8EB', borderRadius: 10, padding: '14px 16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#8B95A1', letterSpacing: '.02em' }}>목표</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#191F28' }}>{CUSTOMER_GOAL.deadline.slice(5).replace('-', '/')}까지 고객 {CUSTOMER_GOAL.target}명</span>
+              <span
+                onClick={handleEditCustomerCount}
+                style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 4, cursor: 'pointer' }}
+                title="클릭해서 수정"
+              >
+                <span style={{ fontSize: 22, fontWeight: 700, color: '#3182F6', letterSpacing: '-0.02em', lineHeight: 1 }}>
+                  {customerCount}
+                </span>
+                <span style={{ fontSize: 12, color: '#8B95A1', fontWeight: 500 }}>/ {CUSTOMER_GOAL.target}</span>
+                <span style={{ fontSize: 11, color: cgDays < 0 ? '#F04452' : '#8B95A1', fontWeight: 500, marginLeft: 8 }}>
+                  {cgDays < 0 ? `D+${Math.abs(cgDays)}` : cgDays === 0 ? 'D-DAY' : `D-${cgDays}`}
+                </span>
+              </span>
+            </div>
+            <div style={{ width: '100%', height: 3, background: '#F2F4F6', borderRadius: 100, overflow: 'hidden', marginTop: 10 }}>
+              <div style={{ width: `${cgPct}%`, height: '100%', background: '#3182F6', borderRadius: 100, transition: 'width .5s ease' }} />
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═══ #1 블로커 ═══ */}
       {data.blocker && (
@@ -1295,7 +1354,7 @@ function DashboardView({
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
             <span
-              onClick={() => onCycleOwner(data.blocker!.id)}
+              onClick={(e) => { e.stopPropagation(); onOwnerPick(data.blocker!.id, e); }}
               style={{
                 fontSize: 11, padding: '3px 10px', borderRadius: 100, cursor: 'pointer', fontWeight: 400,
                 background: ownerColors[data.blocker.owner]?.bg || ownerColors['공동'].bg,
@@ -1339,33 +1398,22 @@ function DashboardView({
         </div>
       )}
 
-      {/* ═══ Quick Add ═══ */}
-      <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-        <input
-          type="text"
-          value={quickInput}
-          onChange={(e) => setQuickInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleQuickAdd(); }}
-          placeholder="할 일 추가… (예: 샘플 발주, 풍성, 내일, 긴급)"
-          style={{
-            flex: 1, fontSize: 13, padding: '8px 12px',
-            background: '#FFFFFF', border: '1px solid #E5E8EB',
-            borderRadius: 8, outline: 'none', color: '#191F28',
-            fontFamily: 'inherit',
-          }}
-        />
-        <button
-          onClick={handleQuickAdd}
-          disabled={!quickInput.trim()}
-          style={{
-            fontSize: 13, fontWeight: 600, padding: '0 14px',
-            background: quickInput.trim() ? '#3182F6' : '#E5E8EB',
-            color: quickInput.trim() ? '#FFFFFF' : '#8B95A1',
-            border: 'none', borderRadius: 8,
-            cursor: quickInput.trim() ? 'pointer' : 'not-allowed',
-          }}
-        >추가</button>
-      </div>
+      {/* ═══ 할 일 추가 ═══ */}
+      <button
+        onClick={onAddNew}
+        style={{
+          alignSelf: 'flex-start',
+          display: 'flex', alignItems: 'center', gap: 6,
+          fontSize: 13, fontWeight: 600, padding: '8px 14px',
+          background: '#3182F6', color: '#FFFFFF',
+          border: 'none', borderRadius: 8, cursor: 'pointer', marginTop: 4,
+        }}
+      >
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+          <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+        </svg>
+        할 일 추가
+      </button>
 
       {/* ═══ 오늘 할 것 ═══ */}
       <div style={{ marginTop: 8 }}>
@@ -1414,11 +1462,13 @@ function DashboardView({
                           <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500, marginLeft: 6 }}>{t.project}</span>
                         )}
                       </span>
-                      {t.deadline && (
-                        <span style={{ fontSize: 11, color: isOverdue ? '#F04452' : '#8B95A1', whiteSpace: 'nowrap', fontWeight: 500 }}>
-                          {fD(t.deadline)}
-                        </span>
-                      )}
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onDateClick(t.id, e); }}
+                        style={{ fontSize: 11, color: t.deadline ? (isOverdue ? '#F04452' : '#8B95A1') : '#C5CCD3', whiteSpace: 'nowrap', fontWeight: 500, cursor: 'pointer', padding: '2px 4px' }}
+                        title={t.deadline ? '날짜 수정' : '날짜 추가'}
+                      >
+                        {t.deadline ? fD(t.deadline) : '+날짜'}
+                      </span>
                     </div>
                   );
                 })}
@@ -1880,6 +1930,57 @@ function ProjectCards({
 }
 
 // ═══════════════════════════════════════════════════
+// OWNER PICKER (inline popover)
+// ═══════════════════════════════════════════════════
+function OwnerPicker({
+  currentOwner, pos, onClose, onPick,
+}: {
+  currentOwner: string;
+  pos: { top: number; left: number };
+  onClose: () => void;
+  onPick: (owner: string) => void;
+}) {
+  const popupTop = Math.min(pos.top + 8, window.innerHeight - 100);
+  const popupLeft = Math.min(pos.left, window.innerWidth - 140);
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1005 }} onClick={onClose}>
+      <div
+        style={{
+          position: 'fixed', top: popupTop, left: popupLeft,
+          background: '#FFFFFF', border: '1px solid #E5E8EB', borderRadius: 8,
+          padding: 4, minWidth: 120,
+          boxShadow: '0 8px 24px rgba(0,0,0,.12)',
+          display: 'flex', flexDirection: 'column', gap: 2,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {OWNERS.map(o => {
+          const oc = ownerColors[o] || ownerColors['공동'];
+          const active = o === currentOwner;
+          return (
+            <button
+              key={o}
+              onClick={() => onPick(o)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '8px 12px', border: 'none',
+                background: active ? '#F2F4F6' : 'transparent',
+                color: '#191F28', fontSize: 13, fontWeight: 500,
+                borderRadius: 6, cursor: 'pointer', textAlign: 'left',
+              }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: oc.accent }} />
+              {o}
+              {active && <span style={{ marginLeft: 'auto', color: '#3182F6', fontWeight: 700 }}>✓</span>}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════
 // INLINE DATE PICKER
 // ═══════════════════════════════════════════════════
 function DatePicker({
@@ -2150,7 +2251,7 @@ function Editor({
     title: task?.title || '',
     category: task?.category || '기타',
     project: task?.project || '',
-    owner: task?.owner || '공동',
+    owner: task?.owner || OWNERS[0],
     deadline: task?.deadline || '',
     status: task?.status || 'todo',
     note: task?.note || '',
