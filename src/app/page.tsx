@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase, dbToApp, appToDb } from '@/lib/supabase';
-import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, PROJECT_META, dU, fD, uid } from '@/lib/constants';
+import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, PROJECT_META, TRACKS, dU, fD, uid } from '@/lib/constants';
 import { calcCriticalPath, AppTask } from '@/lib/criticalPath';
 
 // ═══════════════════════════════════════════════════
@@ -726,7 +726,7 @@ export default function App() {
       <footer style={S.footer}>
         <span>PEACER</span>
         <button onClick={() => { if (confirm('새로고침?')) fetchTasks(); }} style={S.fLink}>새로고침</button>
-        <span style={{ marginLeft: 'auto', opacity: 0.5 }}>v9.2</span>
+        <span style={{ marginLeft: 'auto', opacity: 0.5 }}>v9.3</span>
       </footer>
     </div>
   );
@@ -749,7 +749,15 @@ function DashboardView({
   onDateClick: (id: string, e: React.MouseEvent) => void;
   onCycleOwner: (id: string) => void;
 }) {
-  const [checklistOpen, setChecklistOpen] = useState(false);
+  const [openTracks, setOpenTracks] = useState<Set<string>>(new Set());
+  const [openProjects, setOpenProjects] = useState<Set<string>>(new Set());
+
+  const toggleTrack = (name: string) => {
+    setOpenTracks(prev => { const n = new Set(prev); if (n.has(name)) n.delete(name); else n.add(name); return n; });
+  };
+  const toggleProject = (name: string) => {
+    setOpenProjects(prev => { const n = new Set(prev); if (n.has(name)) n.delete(name); else n.add(name); return n; });
+  };
 
   const data = useMemo(() => {
     // Project-level data
@@ -772,9 +780,11 @@ function DashboardView({
       status: 'done' | 'active' | 'overdue' | 'blocked' | 'todo';
       nextAction: AppTask | null;
       waitingFor: string;
+      tasks: AppTask[];
     };
 
-    const projectStatuses: ProjectStatus[] = Object.entries(PROJECT_META).map(([name, meta]) => {
+    const getProjectStatus = (name: string): ProjectStatus => {
+      const meta = PROJECT_META[name];
       const all = byProjectAll[name] || [];
       const active = byProjectActive[name] || [];
       const doneCount = all.filter(t => t.status === 'done').length;
@@ -793,7 +803,6 @@ function DashboardView({
       else if (unblocked.length > 0) status = 'active';
       else if (blocked.length > 0) status = 'blocked';
 
-      // What's this project waiting for?
       let waitingFor = '';
       if (status === 'blocked' && blocked.length > 0) {
         const depIds = blocked.flatMap(t => t.dependsOn || []);
@@ -803,15 +812,37 @@ function DashboardView({
       }
 
       return {
-        name, emoji: meta.emoji, goal: meta.goal,
+        name, emoji: meta?.emoji || '📌', goal: meta?.goal || '',
         done: doneCount, total, status,
         nextAction: unblocked[0] || null, waitingFor,
+        tasks: all,
       };
-    }).filter(p => p.total > 0);
+    };
 
-    // Sort: overdue first, then active, then blocked, then todo, then done
-    const statusOrder = { overdue: 0, active: 1, blocked: 2, todo: 3, done: 4 };
-    projectStatuses.sort((a, b) => statusOrder[a.status] - statusOrder[b.status]);
+    // Build track data
+    type TrackData = {
+      name: string; emoji: string; goal: string;
+      done: number; total: number;
+      projects: ProjectStatus[];
+      hasOverdue: boolean;
+    };
+
+    const trackData: TrackData[] = TRACKS.map(track => {
+      const projects = track.projects
+        .map(getProjectStatus)
+        .filter(p => p.total > 0);
+      const done = projects.reduce((s, p) => s + p.done, 0);
+      const total = projects.reduce((s, p) => s + p.total, 0);
+      const hasOverdue = projects.some(p => p.status === 'overdue');
+      return { name: track.name, emoji: track.emoji, goal: track.goal, done, total, projects, hasOverdue };
+    });
+
+    // Uncategorized projects (not in any track)
+    const trackedProjects = new Set(TRACKS.flatMap(t => t.projects));
+    const uncategorized = Object.keys(byProjectAll)
+      .filter(p => !trackedProjects.has(p) && p !== '기타')
+      .map(getProjectStatus)
+      .filter(p => p.total > 0);
 
     // Overall stats
     const totalDone = tasks.filter(t => t.status === 'done').length;
@@ -841,19 +872,16 @@ function DashboardView({
       }
     }
 
-    // #1 Blocker — the task with highest downstream impact that's overdue or blocking the most
+    // #1 Blocker
     const blocker = enriched
       .filter(t => t.isUnblocked && (t.blocksCount || 0) > 0)
       .sort((a, b) => {
-        // Overdue first
         const aOd = a.deadline && a.deadline < todayDate ? 1 : 0;
         const bOd = b.deadline && b.deadline < todayDate ? 1 : 0;
         if (bOd !== aOd) return bOd - aOd;
-        // Then by blocks count
         return (b.blocksCount || 0) - (a.blocksCount || 0);
       })[0] || null;
 
-    // Build blocker chain: what gets unblocked if blocker is done
     let blockerChain: string[] = [];
     if (blocker) {
       const getChain = (id: string, depth: number): string[] => {
@@ -865,7 +893,7 @@ function DashboardView({
       blockerChain = getChain(blocker.id, 0);
     }
 
-    // Per-person today tasks — all unblocked tasks for each person
+    // Per-person today tasks
     const personTasks: Record<string, AppTask[]> = {};
     for (const owner of OWNERS.filter(o => o !== '공동')) {
       personTasks[owner] = enriched
@@ -880,7 +908,7 @@ function DashboardView({
         .slice(0, 4);
     }
 
-    return { projectStatuses, totalDone, totalAll, projectedDate, projectedDaysOver, recentDone, blocker, blockerChain, personTasks };
+    return { trackData, uncategorized, totalDone, totalAll, projectedDate, projectedDaysOver, recentDone, blocker, blockerChain, personTasks };
   }, [tasks, enriched, todayDate]);
 
   const overallPct = data.totalAll > 0 ? Math.round((data.totalDone / data.totalAll) * 100) : 0;
@@ -893,6 +921,122 @@ function DashboardView({
     if (s === 'active') return '🔵';
     if (s === 'blocked') return '⏸';
     return '⬜';
+  };
+
+  // Render a project row with optional task expansion
+  const renderProject = (proj: { name: string; emoji: string; done: number; total: number; status: string; nextAction: AppTask | null; waitingFor: string; tasks: AppTask[] }) => {
+    const isOpen = openProjects.has(proj.name);
+    return (
+      <div key={proj.name}>
+        <div
+          onClick={() => toggleProject(proj.name)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px',
+            cursor: 'pointer', borderRadius: 2,
+            background: isOpen ? '#FDFBF7' : 'transparent',
+          }}
+        >
+          <span style={{ fontSize: 13, lineHeight: 1, flexShrink: 0 }}>{statusIcon(proj.status)}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{
+                fontSize: 12,
+                color: proj.status === 'done' ? '#A8C496' : '#1A1613',
+                textDecoration: proj.status === 'done' ? 'line-through' : 'none',
+              }}>
+                {proj.name}
+              </span>
+              <span style={{ fontSize: 9, color: '#AAA49C' }}>{proj.done}/{proj.total}</span>
+            </div>
+            {!isOpen && proj.status !== 'done' && proj.nextAction && (
+              <div style={{ fontSize: 10, color: '#5F4B82', marginTop: 1 }}>
+                → {proj.nextAction.title}
+                <span style={{ color: '#8A7D72' }}> ({proj.nextAction.owner})</span>
+              </div>
+            )}
+            {!isOpen && proj.status === 'blocked' && proj.waitingFor && (
+              <div style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic', marginTop: 1 }}>
+                ← {proj.waitingFor} 완료 대기
+              </div>
+            )}
+          </div>
+          <span style={{
+            fontSize: 9, color: '#8A7D72',
+            transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform .15s',
+          }}>→</span>
+        </div>
+        {/* Expanded tasks */}
+        {isOpen && (
+          <div style={{ padding: '2px 0 6px 28px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {proj.tasks
+              .sort((a, b) => {
+                if (a.status === 'done' && b.status !== 'done') return 1;
+                if (a.status !== 'done' && b.status === 'done') return -1;
+                return dU(a.deadline) - dU(b.deadline);
+              })
+              .map(t => {
+                const isDone = t.status === 'done';
+                const isOverdue = !isDone && t.deadline != null && t.deadline < todayDate;
+                return (
+                  <div
+                    key={t.id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '4px 8px', borderRadius: 2,
+                      borderLeft: `2px solid ${isDone ? '#A8C49655' : isOverdue ? '#B84848' : '#E8DFCE'}`,
+                      opacity: isDone ? 0.5 : 1,
+                    }}
+                  >
+                    <span
+                      onClick={() => isDone ? onCycleStatus(t.id) : onMarkDone(t.id)}
+                      style={{
+                        width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
+                        border: `1.5px solid ${isDone ? '#A8C496' : '#DDD3C2'}`,
+                        background: isDone ? '#A8C496' : 'transparent',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer', fontSize: 8, color: '#fff',
+                      }}
+                    >{isDone ? '✓' : ''}</span>
+                    <span
+                      onClick={() => onEdit(t.id)}
+                      style={{
+                        flex: 1, fontSize: 11, cursor: 'pointer', lineHeight: 1.4,
+                        textDecoration: isDone ? 'line-through' : 'none',
+                        color: isDone ? '#8A7D72' : '#1A1613',
+                      }}
+                    >{t.title}</span>
+                    {t.deadline && (
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onDateClick(t.id, e); }}
+                        style={{ fontSize: 9, color: isOverdue ? '#B84848' : '#8A7D72', fontStyle: 'italic', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      >{fD(t.deadline)}</span>
+                    )}
+                    <span
+                      onClick={() => onCycleOwner(t.id)}
+                      style={{
+                        fontSize: 8, padding: '1px 5px', borderRadius: 100, cursor: 'pointer',
+                        background: ownerColors[t.owner]?.bg || ownerColors['공동'].bg,
+                        color: ownerColors[t.owner]?.accent || ownerColors['공동'].accent,
+                      }}
+                    >{t.owner}</span>
+                    {!isDone && (
+                      <span
+                        onClick={() => onCycleStatus(t.id)}
+                        style={{
+                          ...S.stBadge, cursor: 'pointer', fontSize: 8, padding: '1px 5px',
+                          background: SC[t.status]?.bg, color: SC[t.status]?.tx,
+                          border: `1px solid ${SC[t.status]?.bd}`,
+                        }}
+                      >{SL[t.status]}</span>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -1007,59 +1151,87 @@ function DashboardView({
         </div>
       )}
 
-      {/* ═══ BLOCK 3: 출하 체크리스트 ═══ */}
-      <div style={{ background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 2, overflow: 'hidden' }}>
-        <button
-          onClick={() => setChecklistOpen(!checklistOpen)}
-          style={{
-            width: '100%', padding: '10px 14px', background: 'transparent', border: 'none',
-            display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
-            fontFamily: "'IBM Plex Sans KR',sans-serif",
-          }}
-        >
-          <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 12, color: '#1A1613' }}>
-            출하 체크리스트
-          </span>
-          <span style={{ fontSize: 10, color: '#8A7D72' }}>
-            {data.projectStatuses.filter(p => p.status === 'done').length}/{data.projectStatuses.length} 완료
-          </span>
-          <span style={{ marginLeft: 'auto', fontSize: 10, color: '#8A7D72' }}>
-            {checklistOpen ? '접기 −' : '펼치기 +'}
-          </span>
-        </button>
-        {/* Always show overdue/active projects, rest toggle */}
-        <div style={{ padding: '0 14px 10px', display: 'flex', flexDirection: 'column', gap: 3 }}>
-          {data.projectStatuses
-            .filter(p => checklistOpen || p.status === 'overdue' || p.status === 'active')
-            .map(proj => (
-            <div key={proj.name} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '3px 0' }}>
-              <span style={{ fontSize: 13, lineHeight: 1, marginTop: 1 }}>{statusIcon(proj.status)}</span>
+      {/* ═══ BLOCK 3: 트랙별 현황 (3-track accordion) ═══ */}
+      {data.trackData.map(track => {
+        const isOpen = openTracks.has(track.name);
+        const pct = track.total > 0 ? Math.round((track.done / track.total) * 100) : 0;
+        return (
+          <div key={track.name} style={{
+            background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 2, overflow: 'hidden',
+            borderLeft: track.hasOverdue ? '3px solid #B84848' : undefined,
+          }}>
+            {/* Track header */}
+            <div
+              onClick={() => toggleTrack(track.name)}
+              style={{
+                padding: '10px 14px', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 10,
+              }}
+            >
+              <span style={{ fontSize: 16 }}>{track.emoji}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 12, color: proj.status === 'done' ? '#A8C496' : '#1A1613', textDecoration: proj.status === 'done' ? 'line-through' : 'none' }}>
-                    {proj.name}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13, color: '#1A1613' }}>
+                    {track.name}
                   </span>
-                  <span style={{ fontSize: 9, color: '#AAA49C' }}>{proj.done}/{proj.total}</span>
+                  <span style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic' }}>{track.goal}</span>
                 </div>
-                {proj.status !== 'done' && proj.nextAction && (
-                  <div
-                    onClick={() => onEdit(proj.nextAction!.id)}
-                    style={{ fontSize: 10, color: '#5F4B82', cursor: 'pointer', marginTop: 1 }}
-                  >
-                    → {proj.nextAction.title}
-                    <span style={{ color: '#8A7D72' }}> ({proj.nextAction.owner})</span>
-                  </div>
-                )}
-                {proj.status === 'blocked' && proj.waitingFor && (
-                  <div style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic', marginTop: 1 }}>
-                    ← {proj.waitingFor} 완료 대기
-                  </div>
-                )}
+                {/* Progress dots */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 4 }}>
+                  {track.projects.map(p => (
+                    <span key={p.name} title={`${p.name} ${p.done}/${p.total}`} style={{
+                      width: 8, height: 8, borderRadius: '50%',
+                      background: p.status === 'done' ? '#A8C496'
+                        : p.status === 'overdue' ? '#B84848'
+                        : p.status === 'active' ? '#5F4B82'
+                        : p.status === 'blocked' ? '#C4A896'
+                        : '#DDD3C2',
+                    }} />
+                  ))}
+                  <span style={{ fontSize: 10, color: '#8A7D72', marginLeft: 4 }}>{track.done}/{track.total}</span>
+                </div>
               </div>
+              {/* Track progress bar */}
+              <div style={{ width: 50, height: 4, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${pct}%`, background: track.hasOverdue ? '#B84848' : '#5F4B82', borderRadius: 100, transition: 'width .5s' }} />
+              </div>
+              <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13, color: '#5F4B82', minWidth: 30, textAlign: 'right' as const }}>{pct}%</span>
+              <span style={{
+                fontSize: 10, color: '#8A7D72',
+                transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                transition: 'transform .15s',
+              }}>→</span>
             </div>
-          ))}
+
+            {/* Track expanded — show projects */}
+            {isOpen && (
+              <div style={{ borderTop: '1px solid #E8DFCE', padding: '4px 6px 8px' }}>
+                {track.projects.map(proj => renderProject(proj))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Uncategorized projects */}
+      {data.uncategorized.length > 0 && (
+        <div style={{ background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 2, overflow: 'hidden' }}>
+          <div
+            onClick={() => toggleTrack('기타')}
+            style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}
+          >
+            <span style={{ fontSize: 16 }}>📌</span>
+            <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13, color: '#1A1613', flex: 1 }}>기타</span>
+            <span style={{ fontSize: 10, color: '#8A7D72' }}>{data.uncategorized.length}개 프로젝트</span>
+            <span style={{ fontSize: 10, color: '#8A7D72', transform: openTracks.has('기타') ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .15s' }}>→</span>
+          </div>
+          {openTracks.has('기타') && (
+            <div style={{ borderTop: '1px solid #E8DFCE', padding: '4px 6px 8px' }}>
+              {data.uncategorized.map(proj => renderProject(proj))}
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* ═══ BLOCK 4: 오늘 할 것 — per person ═══ */}
       {OWNERS.filter(o => o !== '공동').map(owner => {
