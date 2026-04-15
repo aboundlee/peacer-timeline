@@ -732,26 +732,17 @@ function DashboardView({
 
     const getPhaseStatus = (phase: Phase): PhaseStatus => {
       const all = phase.projects.flatMap(p => byProjectAll[p] || []);
-      const active = phase.projects.flatMap(p => byProjectActive[p] || []);
       const doneCount = all.filter(t => t.status === 'done').length;
       const total = all.length;
-      const unblocked = active.filter(t => t.isUnblocked);
-      const blocked = active.filter(t => !t.isUnblocked);
       const hasOverdue = all.some(t => t.deadline && t.status !== 'done' && dU(t.deadline) < 0);
       const allDone = total > 0 && doneCount === total;
+      const hasInProgress = all.some(t => t.status === 'doing' || t.status === 'waiting');
 
       let status: PhaseStatus['status'] = 'todo';
       let statusLabel = '미시작';
       if (allDone) { status = 'done'; statusLabel = '완료'; }
       else if (hasOverdue) { status = 'overdue'; statusLabel = '지연'; }
-      else if (unblocked.length > 0) { status = 'active'; statusLabel = '진행중'; }
-      else if (blocked.length > 0) {
-        status = 'blocked'; statusLabel = '대기중';
-        const depIds = blocked.flatMap(t => t.dependsOn || []);
-        const depTasks = depIds.map(id => tasks.find(t => t.id === id)).filter(Boolean);
-        const undone = depTasks.filter(t => t!.status !== 'done');
-        if (undone.length > 0) statusLabel = `${undone[0]!.title} 대기`;
-      }
+      else if (hasInProgress || doneCount > 0) { status = 'active'; statusLabel = '진행중'; }
 
       // Sort tasks: active first by deadline, then done
       const sorted = all.sort((a, b) => {
