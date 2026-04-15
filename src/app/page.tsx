@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase, dbToApp, appToDb } from '@/lib/supabase';
-import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, PROJECT_META, dU, fD, uid } from '@/lib/constants';
+import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, PROJECT_META, PIPELINES, dU, fD, uid } from '@/lib/constants';
 import { calcCriticalPath, AppTask } from '@/lib/criticalPath';
 
 // ═══════════════════════════════════════════════════
@@ -420,35 +420,10 @@ export default function App() {
     return true;
   });
 
-  const { enriched, critical } = calcCriticalPath(tasks);
-  const active = tasks.filter((t) => t.status !== 'done');
-  const overdue = active.filter((t) => t.deadline && dU(t.deadline) < 0);
-  const done = tasks.filter((t) => t.status === 'done');
-  const urgent = active.filter((t) => t.priority === 'high');
+  const { enriched } = calcCriticalPath(tasks);
 
   const todayDate = todayStr();
 
-  // ─── Person-centric today tasks ───
-  const getPersonTodayTasks = useCallback((owner: string) => {
-    return enriched.filter(t => {
-      if (t.status === 'done') return false;
-      if (t.owner !== owner && t.owner !== '공동') return false;
-      const isOverdue = t.deadline != null && t.deadline < todayDate;
-      const isToday = t.deadline === todayDate;
-      const isCritical = (t.blocksCount || 0) > 0;
-      const isHighPriority = t.priority === 'high' && t.deadline != null && dU(t.deadline) <= 3;
-      return isOverdue || isToday || isCritical || isHighPriority;
-    }).sort((a, b) => {
-      const aOverdue = a.deadline && a.deadline < todayDate ? -1 : 0;
-      const bOverdue = b.deadline && b.deadline < todayDate ? -1 : 0;
-      if (aOverdue !== bOverdue) return aOverdue - bOverdue;
-      if ((b.blocksCount || 0) !== (a.blocksCount || 0)) return (b.blocksCount || 0) - (a.blocksCount || 0);
-      return dU(a.deadline) - dU(b.deadline);
-    });
-  }, [enriched, todayDate]);
-
-  const psTasks = useMemo(() => getPersonTodayTasks('풍성'), [getPersonTodayTasks]);
-  const ecTasks = useMemo(() => getPersonTodayTasks('은채'), [getPersonTodayTasks]);
 
   // ─── Projects listing ───
   const projects = useMemo(() => {
@@ -569,94 +544,16 @@ export default function App() {
         </div>
       </div>
 
-      {/* ─── STATS BAR (compact) ─── */}
-      <div style={S.stats}>
-        <div style={{ ...S.st, borderLeftColor: '#B84848' }}>
-          <span style={{ ...S.stN, color: overdue.length ? '#B84848' : '#8A7D72' }}>{overdue.length}</span>
-          <span style={S.stL}>지연</span>
-        </div>
-        <div style={{ ...S.st, borderLeftColor: '#C49696' }}>
-          <span style={{ ...S.stN, color: urgent.length ? '#B84848' : '#8A7D72' }}>{urgent.length}</span>
-          <span style={S.stL}>긴급</span>
-        </div>
-        <div style={{ ...S.st, borderLeftColor: '#5F4B82' }}>
-          <span style={S.stN}>{active.length}</span>
-          <span style={S.stL}>진행</span>
-        </div>
-        <div style={{ ...S.st, borderLeftColor: '#A8C496' }}>
-          <span style={S.stN}>{done.length}/{tasks.length}</span>
-          <span style={S.stL}>완료</span>
-        </div>
-      </div>
-
-      {/* ─── GOAL HEALTH BANNER ─── */}
-      <div style={{ background: 'linear-gradient(135deg, #FAF6EF, #F0E9DB)', border: '1px solid #DDD3C2', borderRadius: 2, padding: '14px 18px', marginBottom: 12, margin: '0 14px 12px' }}>
-        <div style={{ fontFamily: "'DM Serif Display',serif", fontSize: 11, letterSpacing: '.2em', color: '#5F4B82', marginBottom: 8 }}>OUR GOAL</div>
-        <div style={{ fontSize: 15, fontWeight: 400, color: '#1A1613', marginBottom: 12 }}>{OKR.objective}</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {OKR.krs.map((kr, i) => {
-            const relatedProjects = Object.entries(PROJECT_META).filter(([, m]) => m.kr === kr);
-            const relatedTasks = relatedProjects.flatMap(([pName]) => tasks.filter(t => t.project === pName));
-            const total = relatedTasks.length;
-            const done = relatedTasks.filter(t => t.status === 'done').length;
-            const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-            const hasOverdue = relatedTasks.some(t => t.deadline && t.status !== 'done' && dU(t.deadline) < 0);
-            const hasBlocker = relatedTasks.some(t => {
-              const enrichedTask = enriched.find(e => e.id === t.id);
-              return enrichedTask && (enrichedTask.blocksCount || 0) > 0 && enrichedTask.status !== 'done';
-            });
-            return (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 12, color: hasOverdue ? '#B84848' : hasBlocker ? '#8B5A3C' : '#8A7D72', minWidth: 14 }}>
-                  {hasOverdue ? '🔴' : hasBlocker ? '🟡' : pct === 100 ? '🟢' : '⚪'}
-                </span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, color: '#4A3F38', marginBottom: 2 }}>{kr}</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{ flex: 1, height: 3, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
-                      <div style={{ width: `${pct}%`, height: '100%', background: hasOverdue ? '#B84848' : pct === 100 ? '#A8C496' : '#5F4B82', borderRadius: 100, transition: 'width .5s' }} />
-                    </div>
-                    <span style={{ fontSize: 10, color: '#8A7D72', minWidth: 36 }}>{done}/{total}</span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ─── SECTION 1: 풍성의 오늘 ─── */}
-      <PersonSection
-        owner="풍성"
-        tasks={psTasks}
-        allTasks={tasks}
-        selectMode={selectMode}
-        selectedIds={selectedIds}
-        onSelect={toggleSelect}
+      {/* ─── PIPELINE VIEW — the whole picture at a glance ─── */}
+      <PipelineView
+        tasks={tasks}
+        enriched={enriched}
+        todayDate={todayDate}
         onEdit={setEditId}
         onCycleStatus={cycleStatus}
-        onCycleOwner={cycleOwner}
-        onCyclePriority={cyclePriority}
         onMarkDone={markDone}
         onDateClick={(id, e) => { setDatePickerId(id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
-        todayDate={todayDate}
-      />
-
-      {/* ─── SECTION 2: 은채의 오늘 ─── */}
-      <PersonSection
-        owner="은채"
-        tasks={ecTasks}
-        allTasks={tasks}
-        selectMode={selectMode}
-        selectedIds={selectedIds}
-        onSelect={toggleSelect}
-        onEdit={setEditId}
-        onCycleStatus={cycleStatus}
         onCycleOwner={cycleOwner}
-        onCyclePriority={cyclePriority}
-        onMarkDone={markDone}
-        onDateClick={(id, e) => { setDatePickerId(id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
-        todayDate={todayDate}
       />
 
       {/* ─── SECTION 3: 이번 주 ─── */}
@@ -832,279 +729,348 @@ export default function App() {
       <footer style={S.footer}>
         <span>PEACER</span>
         <button onClick={() => { if (confirm('새로고침?')) fetchTasks(); }} style={S.fLink}>새로고침</button>
-        <span style={{ marginLeft: 'auto', opacity: 0.5 }}>v8.0</span>
+        <span style={{ marginLeft: 'auto', opacity: 0.5 }}>v9.0</span>
       </footer>
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════
-// PERSON SECTION — "풍성의 오늘" / "은채의 오늘"
+// PIPELINE VIEW — "우리 지금 어디야?" in 3 seconds
 // ═══════════════════════════════════════════════════
-function PersonSection({
-  owner, tasks: personTasks, allTasks, selectMode, selectedIds, onSelect, onEdit, onCycleStatus, onCycleOwner, onCyclePriority, onMarkDone, onDateClick, todayDate,
+function PipelineView({
+  tasks, enriched, todayDate,
+  onEdit, onCycleStatus, onMarkDone, onDateClick, onCycleOwner,
 }: {
-  owner: string;
   tasks: AppTask[];
-  allTasks: AppTask[];
-  selectMode: boolean;
-  selectedIds: Set<string>;
-  onSelect: (id: string) => void;
+  enriched: AppTask[];
+  todayDate: string;
   onEdit: (id: string) => void;
   onCycleStatus: (id: string) => void;
-  onCycleOwner: (id: string) => void;
-  onCyclePriority: (id: string) => void;
   onMarkDone: (id: string) => void;
   onDateClick: (id: string, e: React.MouseEvent) => void;
-  todayDate: string;
+  onCycleOwner: (id: string) => void;
 }) {
-  const oc = ownerColors[owner] || ownerColors['공동'];
+  const [expandedPipe, setExpandedPipe] = useState<Set<string>>(new Set());
 
-  return (
-    <div style={{
-      margin: '0 14px',
-      borderLeft: `3px solid ${oc.accent}`,
-      borderRadius: 2,
-      background: oc.accent + '08',
-      overflow: 'hidden',
-    }}>
-      {/* Section header */}
-      <div style={{
-        padding: '10px 14px',
-        display: 'flex', alignItems: 'center', gap: 8,
-        borderBottom: personTasks.length > 0 ? `1px solid ${oc.accent}22` : 'none',
-      }}>
-        <span style={{
-          fontFamily: "'DM Serif Display',serif", fontSize: 14, color: oc.accent,
-        }}>
-          {owner}의 오늘
-        </span>
-        <span style={{
-          fontFamily: "'DM Serif Display',serif", fontSize: 20, color: oc.accent, marginLeft: 'auto',
-        }}>
-          {personTasks.length}
-        </span>
-      </div>
-
-      {/* Tasks or empty */}
-      {personTasks.length === 0 ? (
-        <div style={{ padding: '16px 14px', fontSize: 13, color: '#8A7D72', textAlign: 'center' }}>
-          오늘 할 일이 없습니다 ✨
-        </div>
-      ) : (
-        <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {personTasks.map((t) => (
-            <PersonTaskCard
-              key={t.id}
-              t={t}
-              owner={owner}
-              selectMode={selectMode}
-              selected={selectedIds.has(t.id)}
-              onSelect={() => onSelect(t.id)}
-              onEdit={() => onEdit(t.id)}
-              onCycleStatus={() => onCycleStatus(t.id)}
-              onCycleOwner={() => onCycleOwner(t.id)}
-              onCyclePriority={() => onCyclePriority(t.id)}
-              onMarkDone={() => onMarkDone(t.id)}
-              onDateClick={(e) => onDateClick(t.id, e)}
-              todayDate={todayDate}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* This person's upcoming this week */}
-      {(() => {
-        const upcoming = allTasks.filter(t => {
-          if (t.status === 'done') return false;
-          if (t.owner !== owner) return false;
-          if (!t.deadline) return false;
-          const d = dU(t.deadline);
-          return d > 0 && d <= 6;
-        }).sort((a, b) => dU(a.deadline) - dU(b.deadline));
-        if (upcoming.length === 0) return null;
-        return (
-          <div style={{ marginTop: 6, padding: '6px 10px', background: '#FDFBF7', borderRadius: 2, border: '1px solid #EFE7D6' }}>
-            <div style={{ fontSize: 10, color: '#8A7D72', marginBottom: 4, fontStyle: 'italic' }}>이번 주 남은 것</div>
-            {upcoming.map(t => (
-              <div key={t.id} style={{ fontSize: 11, color: '#4A3F38', padding: '2px 0', display: 'flex', gap: 6, alignItems: 'center' }}>
-                <span style={{ color: '#8A7D72', fontSize: 10, minWidth: 28 }}>{fD(t.deadline)}</span>
-                <span>{t.title}</span>
-              </div>
-            ))}
-          </div>
-        );
-      })()}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════
-// PERSON TASK CARD — compact card for person sections
-// ═══════════════════════════════════════════════════
-function PersonTaskCard({
-  t, owner, selectMode, selected, onSelect, onEdit, onCycleStatus, onCycleOwner, onCyclePriority, onMarkDone, onDateClick, todayDate,
-}: {
-  t: AppTask;
-  owner: string;
-  selectMode: boolean;
-  selected: boolean;
-  onSelect: () => void;
-  onEdit: () => void;
-  onCycleStatus: () => void;
-  onCycleOwner: () => void;
-  onCyclePriority: () => void;
-  onMarkDone: () => void;
-  onDateClick: (e: React.MouseEvent) => void;
-  todayDate: string;
-}) {
-  const [flash, setFlash] = useState<string | null>(null);
-  const isOverdue = t.deadline != null && t.deadline < todayDate;
-  const overdueDays = isOverdue && t.deadline ? Math.abs(dU(t.deadline)) : 0;
-  const c = CC[t.category] || CC['기타'];
-
-  const handleStatusClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onCycleStatus();
-    setFlash('status');
-    setTimeout(() => setFlash(null), 300);
+  type StepData = {
+    name: string; emoji: string; goal: string;
+    done: number; total: number; status: 'done' | 'active' | 'overdue' | 'blocked' | 'todo';
+    nextAction: AppTask | null; restActions: AppTask[];
+  };
+  type PipeData = {
+    name: string; emoji: string; steps: StepData[];
+    done: number; total: number;
+    topActions: AppTask[];
   };
 
-  return (
-    <div
-      onClick={() => selectMode ? onSelect() : onEdit()}
-      style={{
-        padding: '8px 10px',
-        background: '#FAF6EF',
-        borderLeft: `3px solid ${c.bd}`,
-        borderRadius: 2,
-        cursor: 'pointer',
-        transition: 'all .15s',
-        animation: 'fadeUp .3s ease-out',
-        outline: selected ? '2px solid #5F4B82' : 'none',
-        outlineOffset: -2,
-      }}
-    >
-      {/* Row 1: priority + title + project badge */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-        {selectMode && (
-          <span style={{ ...S.pChk, background: selected ? '#5F4B82' : 'transparent', borderColor: selected ? '#5F4B82' : '#DDD3C2', color: '#fff' }}>
-            {selected ? '✓' : ''}
-          </span>
-        )}
-        <span
-          onClick={(e) => { e.stopPropagation(); onCyclePriority(); }}
-          style={{ fontSize: 10, cursor: 'pointer' }}
-          title={`우선순위: ${t.priority}`}
-        >
-          {t.priority === 'high' ? '🔴' : t.priority === 'low' ? '🔵' : '⚪'}
-        </span>
-        <span style={{ fontSize: 13, fontWeight: 400, flex: 1, lineHeight: 1.3 }}>
-          {t.title}
-          {t.note && <div style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic', marginTop: 1, lineHeight: 1.3 }}>{t.note}</div>}
-        </span>
-        {t.project && (
-          <span style={{
-            fontSize: 9, padding: '1px 6px', borderRadius: 100,
-            background: '#F5F1EA', color: '#4A3F38', border: '1px solid #E8DFCE',
-          }}>
-            {t.project}
-          </span>
-        )}
-      </div>
+  const data = useMemo(() => {
+    // Index enriched tasks by project
+    const byProjectAll: Record<string, AppTask[]> = {};
+    const byProjectActive: Record<string, AppTask[]> = {};
+    tasks.forEach(t => {
+      const p = t.project || '기타';
+      if (!byProjectAll[p]) byProjectAll[p] = [];
+      byProjectAll[p].push(t);
+    });
+    enriched.forEach(t => {
+      const p = t.project || '기타';
+      if (!byProjectActive[p]) byProjectActive[p] = [];
+      byProjectActive[p].push(t);
+    });
 
-      {/* Row 2: context line */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-        {(t.blocksCount || 0) > 0 && (
-          <span style={{ fontSize: 10, color: '#B84848', fontWeight: 500 }}>
-            이거 끝나야 {t.blocksCount}개 진행
-          </span>
-        )}
-        {isOverdue && (
-          <span style={{ fontSize: 10, color: '#B84848', fontWeight: 500 }}>
-            D+{overdueDays} 지연
-          </span>
-        )}
-        {t.owner === '공동' && (
-          <span style={{
-            fontSize: 9, padding: '1px 5px', borderRadius: 100,
-            background: ownerColors['공동'].bg, color: ownerColors['공동'].accent,
-          }}>
-            공동
-          </span>
-        )}
-      </div>
+    const buildStep = (projName: string): StepData => {
+      const all = byProjectAll[projName] || [];
+      const active = byProjectActive[projName] || [];
+      const meta = PROJECT_META[projName] || { goal: '', emoji: '📌' };
+      const doneCount = all.filter(t => t.status === 'done').length;
+      const total = all.length;
 
-      {/* Row 3: date + status + done */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-        {t.deadline ? (
+      const unblocked = active.filter(t => t.isUnblocked).sort((a, b) => {
+        if ((b.blocksCount || 0) !== (a.blocksCount || 0)) return (b.blocksCount || 0) - (a.blocksCount || 0);
+        return dU(a.deadline) - dU(b.deadline);
+      });
+      const hasOverdue = all.some(t => t.deadline && t.status !== 'done' && dU(t.deadline) < 0);
+      const allDone = total > 0 && doneCount === total;
+      const hasActive = active.length > 0;
+      const hasUnblocked = unblocked.length > 0;
+
+      let status: StepData['status'] = 'todo';
+      if (allDone) status = 'done';
+      else if (hasOverdue) status = 'overdue';
+      else if (hasUnblocked) status = 'active';
+      else if (hasActive) status = 'blocked';
+
+      return {
+        name: projName, emoji: meta.emoji, goal: meta.goal,
+        done: doneCount, total,
+        status,
+        nextAction: unblocked[0] || null,
+        restActions: unblocked.slice(1),
+      };
+    };
+
+    const pipes: PipeData[] = PIPELINES.map(pipe => {
+      const steps = pipe.steps.map(buildStep);
+      const done = steps.reduce((s, st) => s + st.done, 0);
+      const total = steps.reduce((s, st) => s + st.total, 0);
+      // Collect all "next actions" across steps for this pipeline, sorted by urgency
+      const topActions = steps
+        .flatMap(st => st.nextAction ? [st.nextAction] : [])
+        .sort((a, b) => {
+          const aOd = a.deadline && a.deadline < todayDate ? -1 : 0;
+          const bOd = b.deadline && b.deadline < todayDate ? -1 : 0;
+          if (aOd !== bOd) return aOd - bOd;
+          if ((b.blocksCount || 0) !== (a.blocksCount || 0)) return (b.blocksCount || 0) - (a.blocksCount || 0);
+          return dU(a.deadline) - dU(b.deadline);
+        });
+      return { name: pipe.name, emoji: pipe.emoji, steps, done, total, topActions };
+    });
+
+    const totalDone = pipes.reduce((s, p) => s + p.done, 0);
+    const totalAll = pipes.reduce((s, p) => s + p.total, 0);
+
+    // Per-person "지금 이거" — top 1 action per person across all pipelines
+    const allActions = pipes.flatMap(p => p.topActions);
+    const personFocus: Record<string, AppTask | null> = {};
+    for (const owner of OWNERS.filter(o => o !== '공동')) {
+      const mine = allActions.filter(t => t.owner === owner);
+      const shared = allActions.filter(t => t.owner === '공동');
+      personFocus[owner] = mine[0] || shared[0] || null;
+    }
+
+    return { pipes, totalDone, totalAll, personFocus };
+  }, [tasks, enriched, todayDate]);
+
+  const togglePipe = (name: string) => {
+    setExpandedPipe(prev => { const n = new Set(prev); if (n.has(name)) n.delete(name); else n.add(name); return n; });
+  };
+
+  const stepColors: Record<StepData['status'], { bg: string; bd: string; tx: string }> = {
+    done: { bg: '#A8C496', bd: '#A8C496', tx: '#fff' },
+    active: { bg: '#5F4B82', bd: '#5F4B82', tx: '#fff' },
+    overdue: { bg: '#B84848', bd: '#B84848', tx: '#fff' },
+    blocked: { bg: '#F5F1EA', bd: '#DDD3C2', tx: '#8A7D72' },
+    todo: { bg: '#F5F1EA', bd: '#DDD3C2', tx: '#AAA49C' },
+  };
+
+  const renderActionCard = (t: AppTask, compact?: boolean) => {
+    const isOverdue = t.deadline != null && t.deadline < todayDate;
+    const oc = ownerColors[t.owner] || ownerColors['공동'];
+    return (
+      <div
+        key={t.id}
+        onClick={() => onEdit(t.id)}
+        style={{
+          padding: compact ? '5px 8px' : '7px 10px',
+          background: '#FAF6EF',
+          borderRadius: 2, cursor: 'pointer',
+          borderLeft: `3px solid ${isOverdue ? '#B84848' : (t.blocksCount || 0) > 0 ? '#5F4B82' : '#A896C4'}`,
+          transition: 'all .15s',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: compact ? 11 : 12, fontWeight: 400, flex: 1, lineHeight: 1.4, minWidth: 0 }}>
+            {t.title}
+          </span>
           <span
-            onClick={(e) => { e.stopPropagation(); onDateClick(e); }}
-            style={{
-              fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', fontSize: 10,
-              color: isOverdue ? '#B84848' : '#8A7D72',
-              cursor: 'pointer',
-              background: isOverdue ? '#FBEDEA' : '#FAF6EF',
-              padding: '1px 6px', borderRadius: 100,
-              border: `1px solid ${isOverdue ? '#D4A4A4' : '#E8DFCE'}`,
-            }}
+            onClick={(e) => { e.stopPropagation(); onCycleOwner(t.id); }}
+            style={{ ...S.ownB, cursor: 'pointer', background: oc.bg, color: oc.accent }}
           >
-            {fD(t.deadline)}
-            {dU(t.deadline) !== 0 && (
-              <span style={{ fontSize: 8, marginLeft: 3 }}>
-                {dU(t.deadline) < 0 ? `D+${Math.abs(dU(t.deadline))}` : `D-${dU(t.deadline)}`}
-              </span>
-            )}
+            {t.owner}
           </span>
-        ) : (
-          <span
-            onClick={(e) => { e.stopPropagation(); onDateClick(e); }}
-            style={{ fontSize: 10, color: '#CCBFA8', cursor: 'pointer', fontStyle: 'italic' }}
-          >
-            날짜 없음
-          </span>
-        )}
-
-        <span
-          onClick={(e) => { e.stopPropagation(); onCycleOwner(); }}
-          style={{
-            ...S.ownB, cursor: 'pointer',
-            background: ownerColors[t.owner]?.bg || ownerColors['공동'].bg,
-            color: ownerColors[t.owner]?.accent || ownerColors['공동'].accent,
-          }}
-        >
-          {t.owner}
-        </span>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
-          <span
-            onClick={handleStatusClick}
-            style={{
-              ...S.stBadge,
-              background: SC[t.status]?.bg, color: SC[t.status]?.tx,
-              border: `1px solid ${SC[t.status]?.bd}`,
-              cursor: 'pointer', transition: 'all .15s',
-              transform: flash === 'status' ? 'scale(1.15)' : 'scale(1)',
-            }}
-          >
-            {SL[t.status]}
-          </span>
-          {t.status !== 'done' && (
+          {t.deadline && (
             <span
-              onClick={(e) => { e.stopPropagation(); onMarkDone(); }}
+              onClick={(e) => { e.stopPropagation(); onDateClick(t.id, e); }}
               style={{
-                width: 20, height: 20, borderRadius: 2,
-                border: '1.5px solid #A8C496', background: 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                cursor: 'pointer', fontSize: 11, color: '#A8C496',
-                transition: 'all .15s',
+                fontSize: 10, fontFamily: "'DM Serif Display',serif", fontStyle: 'italic',
+                color: isOverdue ? '#B84848' : '#8A7D72', cursor: 'pointer',
+                background: isOverdue ? '#FBEDEA' : 'transparent',
+                padding: '1px 6px', borderRadius: 100,
+                border: isOverdue ? '1px solid #D4A4A4' : '1px solid #E8DFCE',
               }}
-              title="완료 처리"
             >
-              ✓
+              {fD(t.deadline)}
+              <span style={{ fontSize: 8, marginLeft: 3 }}>
+                {dU(t.deadline) < 0 ? `D+${Math.abs(dU(t.deadline))}` : dU(t.deadline) === 0 ? 'TODAY' : `D-${dU(t.deadline)}`}
+              </span>
+            </span>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <span
+              onClick={(e) => { e.stopPropagation(); onCycleStatus(t.id); }}
+              style={{ ...S.stBadge, background: SC[t.status]?.bg, color: SC[t.status]?.tx, border: `1px solid ${SC[t.status]?.bd}`, cursor: 'pointer' }}
+            >
+              {SL[t.status]}
+            </span>
+            <span
+              onClick={(e) => { e.stopPropagation(); onMarkDone(t.id); }}
+              style={{ width: 18, height: 18, borderRadius: 2, border: '1.5px solid #A8C496', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 10, color: '#A8C496' }}
+            >✓</span>
+          </div>
+        </div>
+        {!compact && ((t.blocksCount || 0) > 0 || isOverdue) && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+            {(t.blocksCount || 0) > 0 && <span style={{ fontSize: 10, color: '#5F4B82', fontWeight: 500 }}>이거 끝나야 {t.blocksCount}개 진행</span>}
+            {isOverdue && <span style={{ fontSize: 10, color: '#B84848', fontWeight: 500 }}>D+{Math.abs(dU(t.deadline))} 지연</span>}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const overallPct = data.totalAll > 0 ? Math.round((data.totalDone / data.totalAll) * 100) : 0;
+  const shipDate = MST.find(m => m.label === '출하 목표');
+  const daysLeft = shipDate ? dU(shipDate.date) : null;
+
+  return (
+    <div style={{ margin: '0 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+
+      {/* ─── OVERALL PROGRESS ─── */}
+      <div style={{ background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 2, padding: '12px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6 }}>
+          <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 11, letterSpacing: '.2em', color: '#5F4B82' }}>OUR GOAL</span>
+          {daysLeft != null && (
+            <span style={{ marginLeft: 'auto', fontFamily: "'DM Serif Display',serif", fontSize: 14, color: daysLeft <= 7 ? '#B84848' : '#5F4B82' }}>
+              {daysLeft <= 0 ? `D+${Math.abs(daysLeft)}` : `D-${daysLeft}`}
             </span>
           )}
         </div>
+        <div style={{ fontSize: 14, fontWeight: 400, color: '#1A1613', marginBottom: 8 }}>{OKR.objective}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ flex: 1, height: 6, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
+            <div style={{ width: `${overallPct}%`, height: '100%', background: overallPct === 100 ? '#A8C496' : '#5F4B82', borderRadius: 100, transition: 'width .5s' }} />
+          </div>
+          <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 14, color: '#5F4B82', minWidth: 40, textAlign: 'right' }}>{overallPct}%</span>
+          <span style={{ fontSize: 10, color: '#8A7D72' }}>{data.totalDone}/{data.totalAll}</span>
+        </div>
+      </div>
+
+      {/* ─── PIPELINES ─── */}
+      {data.pipes.map(pipe => {
+        const isExpanded = expandedPipe.has(pipe.name);
+        const pipePct = pipe.total > 0 ? Math.round((pipe.done / pipe.total) * 100) : 0;
+        return (
+          <div key={pipe.name} style={{ background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 2, overflow: 'hidden' }}>
+            {/* Pipeline header */}
+            <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 16 }}>{pipe.emoji}</span>
+              <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13, color: '#1A1613' }}>{pipe.name}</span>
+              <span style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic', marginLeft: 'auto' }}>{pipePct}%</span>
+            </div>
+
+            {/* Step dots */}
+            <div style={{ padding: '0 14px 8px', display: 'flex', alignItems: 'center', gap: 0 }}>
+              {pipe.steps.map((step, i) => {
+                const sc = stepColors[step.status];
+                const prevDone = i === 0 || pipe.steps[i - 1].status === 'done';
+                return (
+                  <React.Fragment key={step.name}>
+                    {i > 0 && (
+                      <div style={{ flex: 1, height: 2, background: prevDone ? '#A8C496' : '#E8DFCE', minWidth: 8 }} />
+                    )}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flexShrink: 0 }}>
+                      <div style={{
+                        width: 24, height: 24, borderRadius: '50%',
+                        background: sc.bg, border: `2px solid ${sc.bd}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 10, color: sc.tx, fontWeight: 600,
+                        position: 'relative',
+                      }}>
+                        {step.status === 'done' ? '✓' : step.status === 'active' || step.status === 'overdue' ? '→' : ''}
+                      </div>
+                      <span style={{
+                        fontSize: 9, color: step.status === 'done' ? '#A8C496' : step.status === 'active' ? '#5F4B82' : step.status === 'overdue' ? '#B84848' : '#AAA49C',
+                        fontWeight: step.status === 'active' || step.status === 'overdue' ? 500 : 300,
+                        whiteSpace: 'nowrap', maxWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis',
+                        textAlign: 'center',
+                      }}>
+                        {step.name}
+                      </span>
+                    </div>
+                  </React.Fragment>
+                );
+              })}
+            </div>
+
+            {/* Top action for this pipeline */}
+            {pipe.topActions.length > 0 && (
+              <div style={{ padding: '0 10px 10px' }}>
+                <div style={{ fontSize: 10, color: '#5F4B82', fontWeight: 500, marginBottom: 3, paddingLeft: 4 }}>→ 지금:</div>
+                {renderActionCard(pipe.topActions[0])}
+                {pipe.topActions.length > 1 && (
+                  <button
+                    onClick={() => togglePipe(pipe.name)}
+                    style={{ background: 'transparent', border: 'none', padding: '4px 4px 0', fontSize: 10, color: '#5F4B82', cursor: 'pointer' }}
+                  >
+                    + {pipe.topActions.length - 1}개 더 {isExpanded ? '−' : '+'}
+                  </button>
+                )}
+                {isExpanded && pipe.topActions.slice(1).map(t => (
+                  <div key={t.id} style={{ marginTop: 2 }}>{renderActionCard(t, true)}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* ─── PERSON FOCUS — "지금 이거" per person ─── */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        {OWNERS.filter(o => o !== '공동').map(owner => {
+          const task = data.personFocus[owner];
+          const oc = ownerColors[owner] || ownerColors['공동'];
+          const myTotal = enriched.filter(t => t.owner === owner).length;
+          const myOverdue = enriched.filter(t => t.owner === owner && t.deadline != null && t.deadline < todayDate).length;
+          return (
+            <div key={owner} style={{
+              flex: 1, background: '#FAF6EF', borderRadius: 2, overflow: 'hidden',
+              borderLeft: `3px solid ${oc.accent}`, border: '1px solid #E8DFCE',
+            }}>
+              <div style={{ padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6, borderBottom: task ? `1px solid #E8DFCE` : 'none' }}>
+                <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 12, color: oc.accent }}>{owner}</span>
+                <span style={{ fontSize: 10, color: '#8A7D72' }}>{myTotal}개</span>
+                {myOverdue > 0 && <span style={{ fontSize: 10, color: '#B84848' }}>지연 {myOverdue}</span>}
+              </div>
+              {task ? (
+                <div style={{ padding: '6px 8px' }}>
+                  <div style={{ fontSize: 9, color: '#8A7D72', marginBottom: 2 }}>지금 이거:</div>
+                  <div
+                    onClick={() => onEdit(task.id)}
+                    style={{ fontSize: 11, color: '#1A1613', cursor: 'pointer', lineHeight: 1.4 }}
+                  >
+                    {task.title}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                    {task.deadline && (
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onDateClick(task.id, e); }}
+                        style={{
+                          fontSize: 9, fontStyle: 'italic', cursor: 'pointer',
+                          color: task.deadline < todayDate ? '#B84848' : '#8A7D72',
+                        }}
+                      >
+                        {fD(task.deadline)}
+                      </span>
+                    )}
+                    <span
+                      onClick={(e) => { e.stopPropagation(); onCycleStatus(task.id); }}
+                      style={{ ...S.stBadge, background: SC[task.status]?.bg, color: SC[task.status]?.tx, border: `1px solid ${SC[task.status]?.bd}`, cursor: 'pointer', fontSize: 8, padding: '1px 5px' }}
+                    >
+                      {SL[task.status]}
+                    </span>
+                    <span
+                      onClick={(e) => { e.stopPropagation(); onMarkDone(task.id); }}
+                      style={{ width: 16, height: 16, borderRadius: 2, border: '1.5px solid #A8C496', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 9, color: '#A8C496', marginLeft: 'auto' }}
+                    >✓</span>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: '6px 10px', fontSize: 10, color: '#AAA49C', fontStyle: 'italic' }}>모두 완료</div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
