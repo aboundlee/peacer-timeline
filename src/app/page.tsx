@@ -1241,27 +1241,15 @@ function DashboardView({
       <div style={{ background: '#FFFFFF', border: '1px solid #E5E8EB', borderRadius: 10, padding: '14px 16px' }}>
         {/* Primary row — ship status & delay */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
-          {daysLeft != null && (
+          {daysLeft != null && shipDate && (
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
               <span style={{ fontSize: 22, fontWeight: 700, color: '#191F28', letterSpacing: '-0.02em', lineHeight: 1 }}>
                 {daysLeft < 0 ? `D+${Math.abs(daysLeft)}` : daysLeft === 0 ? 'D-DAY' : `D-${daysLeft}`}
               </span>
-              <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>출시까지</span>
-            </div>
-          )}
-          {data.projectedDaysOver != null && data.projectedDaysOver > 0 ? (
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span style={{ fontSize: 22, fontWeight: 700, color: '#F04452', letterSpacing: '-0.02em', lineHeight: 1 }}>
-                +{data.projectedDaysOver}일
+              <span style={{ fontSize: 13, color: '#4E5968', fontWeight: 600 }}>
+                {shipDate.date.replace(/-/g, '.')}
               </span>
-              <span style={{ fontSize: 11, color: '#F04452', fontWeight: 500 }}>지연 예상</span>
-            </div>
-          ) : data.projectedDate && (
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#22C55E', lineHeight: 1 }}>
-                일정 내
-              </span>
-              <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>완료 예상 {data.projectedDate}</span>
+              <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>출시</span>
             </div>
           )}
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 4 }}>
