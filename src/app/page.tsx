@@ -1,9 +1,92 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase, dbToApp, appToDb } from '@/lib/supabase';
-import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, dU, fD, uid } from '@/lib/constants';
+import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, PROJECT_META, dU, fD, uid } from '@/lib/constants';
 import { calcCriticalPath, AppTask } from '@/lib/criticalPath';
+
+// ═══════════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════════
+const todayStr = () => new Date().toISOString().slice(0, 10);
+
+function parseQuickInput(raw: string): Partial<AppTask> {
+  const parts = raw.split(',').map((s) => s.trim());
+  const title = parts[0] || '';
+  const result: Partial<AppTask> = { title, status: 'todo' as const, priority: 'medium' as const };
+
+  const today = new Date();
+  for (let i = 1; i < parts.length; i++) {
+    const p = parts[i];
+    if (p === '오늘') {
+      result.deadline = todayStr();
+    } else if (p === '내일') {
+      const d = new Date(today);
+      d.setDate(d.getDate() + 1);
+      result.deadline = d.toISOString().slice(0, 10);
+    } else if (p === '이번주') {
+      const d = new Date(today);
+      const day = d.getDay();
+      const diff = day === 0 ? 5 : 5 - day;
+      d.setDate(d.getDate() + (diff < 0 ? 0 : diff));
+      result.deadline = d.toISOString().slice(0, 10);
+    } else if (p === '다음주') {
+      const d = new Date(today);
+      const day = d.getDay();
+      const diff = day === 0 ? 1 : 8 - day;
+      d.setDate(d.getDate() + diff);
+      result.deadline = d.toISOString().slice(0, 10);
+    } else if (OWNERS.includes(p)) {
+      result.owner = p;
+    } else if (['긴급', '급해', '중요'].includes(p)) {
+      result.priority = 'high';
+    } else if (CATS.includes(p)) {
+      result.category = p;
+    }
+  }
+  return result;
+}
+
+function getWeekDays(): { date: Date; str: string; label: string }[] {
+  const today = new Date();
+  const day = today.getDay();
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
+  const dayLabels = ['월', '화', '수', '목', '금', '토', '일'];
+  const result = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    result.push({
+      date: d,
+      str: d.toISOString().slice(0, 10),
+      label: dayLabels[i],
+    });
+  }
+  return result;
+}
+
+function getDownstream(taskId: string, allTasks: AppTask[], visited = new Set<string>()): AppTask[] {
+  if (visited.has(taskId)) return [];
+  visited.add(taskId);
+  const blocked = allTasks.filter((t) => (t.dependsOn || []).includes(taskId));
+  let result = [...blocked];
+  for (const b of blocked) {
+    result = result.concat(getDownstream(b.id, allTasks, visited));
+  }
+  return result;
+}
+
+const catEmoji: Record<string, string> = {
+  '제조': '🧪', '마케팅': '📣', '사업자/인허가': '🏢',
+  '디자인': '🎨', '계약': '📝', '기타': '📌',
+};
+
+const ownerColors: Record<string, { bg: string; accent: string }> = {
+  '풍성': { bg: '#D4C5EA', accent: '#5F4B82' },
+  '은채': { bg: '#EDD9C4', accent: '#8B5A3C' },
+  '공동': { bg: '#DDD3C2', accent: '#4A3F38' },
+};
 
 // ═══════════════════════════════════════════════════
 // MAIN APP
@@ -11,16 +94,92 @@ import { calcCriticalPath, AppTask } from '@/lib/criticalPath';
 export default function App() {
   const [tasks, setTasks] = useState<AppTask[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [view, setView] = useState('today');
   const [editId, setEditId] = useState<string | null>(null);
-  const [addMode, setAddMode] = useState(false);
-  const [syncMode, setSyncMode] = useState(false);
-  const [analyzeMode, setAnalyzeMode] = useState(false);
   const [fCat, setFCat] = useState('all');
   const [fOwn, setFOwn] = useState('all');
   const [dragId, setDragId] = useState<string | null>(null);
   const [dragCol, setDragCol] = useState<string | null>(null);
   const [realtimeStatus, setRealtimeStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [cmdText, setCmdText] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+  const [datePickerId, setDatePickerId] = useState<string | null>(null);
+  const [datePickerPos, setDatePickerPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
+  const [cascadeConfirm, setCascadeConfirm] = useState<{ taskId: string; newDate: string; oldDate: string; downstream: AppTask[]; diffDays: number } | null>(null);
+  const [undoStack, setUndoStack] = useState<{ id: string; prev: Partial<AppTask>; label: string }[]>([]);
+  const [toast, setToast] = useState<{ message: string; undoAction?: () => void } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cmdRef = useRef<HTMLInputElement>(null);
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+
+  // Show toast with optional undo
+  const showToast = useCallback((message: string, undoAction?: () => void) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToast({ message, undoAction });
+    toastTimer.current = setTimeout(() => setToast(null), 4000);
+  }, []);
+
+  // Undo last action
+  const undo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const last = undoStack[undoStack.length - 1];
+    setUndoStack((prev) => prev.slice(0, -1));
+    up(last.id, last.prev);
+    showToast(`되돌림: ${last.label}`);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [undoStack, showToast]);
+
+  // Tracked update — saves undo history
+  const upWithUndo = (id: string, updates: Partial<AppTask>, label: string) => {
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+    const prev: Partial<AppTask> = {};
+    for (const key of Object.keys(updates)) {
+      (prev as Record<string, unknown>)[key] = (task as Record<string, unknown>)[key];
+    }
+    setUndoStack((stack) => [...stack.slice(-19), { id, prev, label }]);
+    up(id, updates);
+  };
+
+  // Cmd+K to focus command bar, Cmd+Z to undo
+  useEffect(() => {
+    const handleGlobalKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        cmdRef.current?.focus();
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+        const tag = (e.target as HTMLElement)?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        e.preventDefault();
+        undo();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKey);
+    return () => window.removeEventListener('keydown', handleGlobalKey);
+  }, [undo]);
+
+  // Load collapsed state from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('peacer-collapsed');
+      if (saved) setCollapsed(JSON.parse(saved));
+      else {
+        if (window.innerWidth < 768) {
+          setCollapsed({ weekly: true, projects: true, kanban: true });
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const toggleCollapse = (key: string) => {
+    setCollapsed((prev) => {
+      const next = { ...prev, [key]: !prev[key] };
+      try { localStorage.setItem('peacer-collapsed', JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
 
   // ─── Load from Supabase ───
   const fetchTasks = useCallback(async () => {
@@ -135,6 +294,126 @@ export default function App() {
     }
   };
 
+  // ─── Cascade date shift ───
+  const shiftDateBy = (dateStr: string, days: number): string => {
+    const d = new Date(dateStr + 'T00:00:00');
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
+  };
+
+  const handleDateChange = (taskId: string, newDate: string) => {
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    const oldDate = task.deadline;
+    if (!oldDate) {
+      up(taskId, { deadline: newDate });
+      setDatePickerId(null);
+      return;
+    }
+    const diffDays = Math.round((new Date(newDate + 'T00:00:00').getTime() - new Date(oldDate + 'T00:00:00').getTime()) / 864e5);
+    if (diffDays === 0) { setDatePickerId(null); return; }
+
+    const downstream = getDownstream(taskId, tasks);
+    if (downstream.length > 0) {
+      setCascadeConfirm({ taskId, newDate, oldDate, downstream, diffDays });
+      setDatePickerId(null);
+    } else {
+      up(taskId, { deadline: newDate });
+      setDatePickerId(null);
+    }
+  };
+
+  const applyCascade = async (cascadeAll: boolean) => {
+    if (!cascadeConfirm) return;
+    const { taskId, newDate, downstream, diffDays } = cascadeConfirm;
+    up(taskId, { deadline: newDate });
+    if (cascadeAll) {
+      for (const dt of downstream) {
+        if (dt.deadline) {
+          const shifted = shiftDateBy(dt.deadline, diffDays);
+          up(dt.id, { deadline: shifted });
+        }
+      }
+    }
+    setCascadeConfirm(null);
+  };
+
+  // ─── Status/Owner/Priority cycling ───
+  const cycleStatus = (id: string) => {
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+    const activeCycle: (typeof STS[number])[] = ['todo', 'doing', 'waiting'];
+    const idx = activeCycle.indexOf(task.status as typeof STS[number]);
+    const next = idx >= 0 ? activeCycle[(idx + 1) % activeCycle.length] : 'todo';
+    upWithUndo(id, { status: next as AppTask['status'] }, `"${task.title}" ${SL[task.status]} → ${SL[next]}`);
+    showToast(`${SL[next]}으로 변경: ${task.title}`);
+  };
+
+  const markDone = (id: string) => {
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+    upWithUndo(id, { status: 'done' as AppTask['status'] }, `"${task.title}" 완료 처리`);
+    showToast(`✓ 완료: ${task.title}`, () => {
+      undo();
+    });
+  };
+
+  const cycleOwner = (id: string) => {
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+    const idx = OWNERS.indexOf(task.owner);
+    const next = OWNERS[(idx + 1) % OWNERS.length];
+    upWithUndo(id, { owner: next }, `"${task.title}" 담당 ${task.owner} → ${next}`);
+  };
+
+  const cyclePriority = (id: string) => {
+    const task = tasks.find((t) => t.id === id);
+    if (!task) return;
+    const order: AppTask['priority'][] = ['medium', 'high', 'low'];
+    const idx = order.indexOf(task.priority as AppTask['priority']);
+    const next = order[(idx + 1) % order.length];
+    upWithUndo(id, { priority: next }, `"${task.title}" 우선순위 변경`);
+  };
+
+  // ─── Batch operations ───
+  const batchShift = (days: number) => {
+    selectedIds.forEach((id) => {
+      const t = tasks.find((x) => x.id === id);
+      if (t?.deadline) {
+        up(id, { deadline: shiftDateBy(t.deadline, days) });
+      } else {
+        const d = new Date();
+        d.setDate(d.getDate() + days);
+        up(id, { deadline: d.toISOString().slice(0, 10) });
+      }
+    });
+  };
+
+  const batchStatus = (status: string) => {
+    selectedIds.forEach((id) => {
+      up(id, { status: status as AppTask['status'] });
+    });
+    setSelectedIds(new Set());
+    setSelectMode(false);
+  };
+
+  const batchDelete = () => {
+    if (!confirm(`${selectedIds.size}개 삭제할까요?`)) return;
+    selectedIds.forEach((id) => del(id));
+    setSelectedIds(new Set());
+    setSelectMode(false);
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // ─── Derived data ───
   const filtered = tasks.filter((t) => {
     if (fCat !== 'all' && t.category !== fCat) return false;
     if (fOwn !== 'all' && t.owner !== fOwn) return false;
@@ -147,22 +426,62 @@ export default function App() {
   const done = tasks.filter((t) => t.status === 'done');
   const urgent = active.filter((t) => t.priority === 'high');
 
+  const todayDate = todayStr();
+
+
+  // ─── Projects listing ───
+  const projects = useMemo(() => {
+    const map: Record<string, { tasks: AppTask[]; category: string }> = {};
+    tasks.forEach(t => {
+      const proj = t.project || '기타';
+      if (!map[proj]) map[proj] = { tasks: [], category: t.category };
+      map[proj].tasks.push(t);
+    });
+    return Object.entries(map)
+      .map(([name, { tasks: items, category }]) => {
+        const doneCount = items.filter(t => t.status === 'done').length;
+        const total = items.length;
+        const activeCount = total - doneCount;
+        const owners = items.map(t => t.owner);
+        const primaryOwner = owners.sort((a, b) =>
+          owners.filter(v => v === b).length - owners.filter(v => v === a).length
+        )[0] || '공동';
+        const isNew = items.every(t => t.status === 'todo');
+        return { name, category, items, done: doneCount, total, active: activeCount, primaryOwner, isNew };
+      })
+      .sort((a, b) => b.active - a.active);
+  }, [tasks]);
+
+  const toggleProjectExpand = (name: string) => {
+    setExpandedProjects(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  // ─── Loading state ───
   if (!loaded) {
     return (
       <div style={{ ...S.root, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontFamily: "'DM Serif Display',serif", fontSize: 24, marginBottom: 8 }}>PEACER</div>
-          <div style={{ fontSize: 13, color: '#8A7D72' }}>불러오는 중...</div>
+          <div style={{ fontSize: 13, color: '#8A7D72' }}>...</div>
         </div>
       </div>
     );
   }
 
+  // Suppress unused warnings for preserved functions
+  void addBatch;
+  void applyDeps;
+
   return (
     <div style={S.root}>
       <style>{CSS}</style>
 
-      {/* HEADER */}
+      {/* ─── HEADER (sticky) ─── */}
       <header style={S.header}>
         <div style={S.hL}>
           <div style={S.brand}>
@@ -170,17 +489,13 @@ export default function App() {
             <span style={S.bTxt}>PEACER</span>
             <span
               style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
+                width: 8, height: 8, borderRadius: '50%',
                 background: realtimeStatus === 'connected' ? '#A8C496' : realtimeStatus === 'error' ? '#B84848' : '#DDD3C2',
-                display: 'inline-block',
-                marginLeft: 4,
+                display: 'inline-block', marginLeft: 4,
               }}
               title={realtimeStatus === 'connected' ? '실시간 연결됨' : realtimeStatus === 'error' ? '연결 오류' : '연결 중...'}
             />
           </div>
-          <h1 style={S.h1}>런칭 타임라인</h1>
         </div>
         <div style={S.hR}>
           {MST.map((m, i) => {
@@ -198,13 +513,42 @@ export default function App() {
         </div>
       </header>
 
-      {/* OKR BAR */}
-      <div style={S.okr}>
-        <span style={S.okrLabel}>Q2 OKR</span>
-        <span style={S.okrText}>{OKR.objective}</span>
+      {/* ─── QUICK ADD BAR (sticky) ─── */}
+      <div style={S.cmdBar}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', width: '100%', flexWrap: 'wrap' }}>
+          <input
+            ref={cmdRef as React.RefObject<HTMLInputElement>}
+            value={cmdText}
+            onChange={(e) => setCmdText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                if (!cmdText.trim()) return;
+                const parsed = parseQuickInput(cmdText.trim());
+                if (parsed.title) { add(parsed); setCmdText(''); showToast(`추가됨: ${parsed.title}`); }
+              }
+            }}
+            placeholder="할 일 추가 (예: 몰드 업체 구하기, 오늘, 풍성, 긴급)"
+            style={S.cmdInput}
+          />
+          <button
+            onClick={() => {
+              if (!cmdText.trim()) return;
+              const parsed = parseQuickInput(cmdText.trim());
+              if (parsed.title) { add(parsed); setCmdText(''); showToast(`추가됨: ${parsed.title}`); }
+            }}
+            disabled={!cmdText.trim()}
+            style={{ ...S.cmdAddBtn, opacity: !cmdText.trim() ? 0.5 : 1 }}
+          >
+            추가
+          </button>
+        </div>
+        <div style={{ fontSize: 9, color: '#AAA49C', marginTop: 4 }}>
+          콤마로 구분: 제목, 날짜(오늘/내일/이번주/다음주), 담당(풍성/은채), 긴급 · Cmd+K 포커스
+        </div>
       </div>
 
-      {/* STATS */}
+      {/* ─── STATS BAR (compact) ─── */}
       <div style={S.stats}>
         <div style={{ ...S.st, borderLeftColor: '#B84848' }}>
           <span style={{ ...S.stN, color: overdue.length ? '#B84848' : '#8A7D72' }}>{overdue.length}</span>
@@ -219,64 +563,89 @@ export default function App() {
           <span style={S.stL}>진행</span>
         </div>
         <div style={{ ...S.st, borderLeftColor: '#A8C496' }}>
-          <span style={S.stN}>
-            {done.length}/{tasks.length}
-          </span>
+          <span style={S.stN}>{done.length}/{tasks.length}</span>
           <span style={S.stL}>완료</span>
         </div>
       </div>
 
-      {/* CONTROLS */}
-      <div style={S.ctrl}>
-        <div style={S.tabs}>
-          {(
-            [
-              ['today', '⚡ 오늘'],
-              ['project', '📁 프로젝트'],
-              ['board', '📋 보드'],
-              ['roadmap', '🗺 로드맵'],
-            ] as const
-          ).map(([k, l]) => (
-            <button key={k} onClick={() => setView(k)} style={{ ...S.tab, ...(view === k ? S.tabOn : {}) }}>
-              {l}
-            </button>
-          ))}
-        </div>
-        <div style={S.filters}>
-          <select value={fCat} onChange={(e) => setFCat(e.target.value)} style={S.sel}>
-            <option value="all">전체</option>
-            {CATS.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </select>
-          <select value={fOwn} onChange={(e) => setFOwn(e.target.value)} style={S.sel}>
-            <option value="all">전체</option>
-            {OWNERS.map((o) => (
-              <option key={o}>{o}</option>
-            ))}
-          </select>
-        </div>
-        <button onClick={() => setSyncMode(true)} style={S.syncBtn}>
-          📋 텍스트 추가
-        </button>
-        <button onClick={() => setAnalyzeMode(true)} style={S.aiBtn}>
-          🔗 AI 분석
-        </button>
-        <button onClick={() => setAddMode(true)} style={S.addBtn}>
-          +
-        </button>
-      </div>
+      {/* ─── GOAL DASHBOARD: KR → Project → Next Action ─── */}
+      <GoalDashboard
+        tasks={tasks}
+        enriched={enriched}
+        todayDate={todayDate}
+        onEdit={setEditId}
+        onCycleStatus={cycleStatus}
+        onMarkDone={markDone}
+        onDateClick={(id, e) => { setDatePickerId(id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
+        onCycleOwner={cycleOwner}
+      />
 
-      {/* VIEWS */}
-      {view === 'today' && (
-        <TodayView tasks={tasks} enriched={enriched} critical={critical} onEdit={setEditId} onSt={(id, s) => up(id, { status: s as AppTask['status'] })} />
-      )}
-      {view === 'project' && <ProjectView tasks={filtered} allTasks={tasks} onEdit={setEditId} />}
-      {view === 'board' && (
+      {/* ─── PERSON SUMMARY BAR ─── */}
+      <PersonSummary tasks={tasks} enriched={enriched} todayDate={todayDate} />
+
+      {/* ─── SECTION 3: 이번 주 ─── */}
+      <CollapsibleSection
+        title="📅 이번 주"
+        sectionKey="weekly"
+        collapsed={!!collapsed.weekly}
+        onToggle={() => toggleCollapse('weekly')}
+      >
+        <WeeklyGrid tasks={tasks} onEdit={setEditId} onDateChange={handleDateChange} />
+      </CollapsibleSection>
+
+      {/* ─── SECTION 4: 프로젝트 ─── */}
+      <CollapsibleSection
+        title="📁 프로젝트"
+        sectionKey="projects"
+        collapsed={!!collapsed.projects}
+        onToggle={() => toggleCollapse('projects')}
+      >
+        <ProjectCards
+          projects={projects}
+          expandedProjects={expandedProjects}
+          onToggleExpand={toggleProjectExpand}
+          onEdit={setEditId}
+          onCycleStatus={cycleStatus}
+          onMarkDone={markDone}
+          onDateClick={(id, e) => { setDatePickerId(id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
+        />
+      </CollapsibleSection>
+
+      {/* ─── SECTION 5: 전체 보기 (칸반) ─── */}
+      <CollapsibleSection
+        title="📋 전체 보기 (칸반)"
+        sectionKey="kanban"
+        collapsed={!!collapsed.kanban}
+        onToggle={() => toggleCollapse('kanban')}
+      >
+        <div style={{ ...S.filterBar, padding: '0 0 8px', margin: 0 }}>
+          <div style={S.filters}>
+            <select value={fCat} onChange={(e) => setFCat(e.target.value)} style={S.sel}>
+              <option value="all">전체 카테고리</option>
+              {CATS.map((c) => <option key={c}>{c}</option>)}
+            </select>
+            <select value={fOwn} onChange={(e) => setFOwn(e.target.value)} style={S.sel}>
+              <option value="all">전체 담당</option>
+              {OWNERS.map((o) => <option key={o}>{o}</option>)}
+            </select>
+          </div>
+          <button
+            onClick={() => { setSelectMode(!selectMode); if (selectMode) setSelectedIds(new Set()); }}
+            style={{ ...S.toolBtn, background: selectMode ? '#5F4B82' : '#FAF6EF', color: selectMode ? '#fff' : '#5F4B82' }}
+          >
+            {selectMode ? '선택 해제' : '선택'}
+          </button>
+        </div>
         <BoardView
           tasks={filtered}
+          selectMode={selectMode} selectedIds={selectedIds}
+          onSelect={toggleSelect}
           onEdit={setEditId}
-          onSt={(id, s) => up(id, { status: s as AppTask['status'] })}
+          onCycleStatus={cycleStatus}
+          onCycleOwner={cycleOwner}
+          onCyclePriority={cyclePriority}
+          onMarkDone={markDone}
+          onDateClick={(id, e) => { setDatePickerId(id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
           dragId={dragId}
           dragCol={dragCol}
           onDS={(id) => setDragId(id)}
@@ -284,17 +653,67 @@ export default function App() {
           onDD={(s) => () => { if (dragId) up(dragId, { status: s as AppTask['status'] }); setDragId(null); setDragCol(null); }}
           onDE={() => { setDragId(null); setDragCol(null); }}
         />
-      )}
-      {view === 'roadmap' && <RoadmapView tasks={filtered} allTasks={tasks} onEdit={setEditId} />}
+      </CollapsibleSection>
 
-      {/* MODALS */}
-      {addMode && (
-        <Editor
-          onClose={() => setAddMode(false)}
-          onSave={(t) => { add(t); setAddMode(false); }}
-          allTasks={tasks}
+      {/* ─── BATCH ACTION BAR ─── */}
+      {selectMode && selectedIds.size > 0 && (
+        <div style={S.batchBar}>
+          <span style={S.batchLabel}>{selectedIds.size}개 선택</span>
+          <button onClick={() => batchShift(1)} style={S.batchBtn}>+1일</button>
+          <button onClick={() => batchShift(3)} style={S.batchBtn}>+3일</button>
+          <button onClick={() => batchShift(7)} style={S.batchBtn}>+7일</button>
+          <select onChange={(e) => { if (e.target.value) batchStatus(e.target.value); e.target.value = ''; }} style={S.batchSel}>
+            <option value="">상태변경</option>
+            {STS.map((s) => <option key={s} value={s}>{SL[s]}</option>)}
+          </select>
+          <button onClick={batchDelete} style={{ ...S.batchBtn, background: '#B84848', color: '#fff' }}>삭제</button>
+        </div>
+      )}
+
+      {/* ─── DATE PICKER POPUP ─── */}
+      {datePickerId && (
+        <DatePicker
+          task={tasks.find((t) => t.id === datePickerId)!}
+          pos={datePickerPos}
+          onClose={() => setDatePickerId(null)}
+          onDateChange={(date) => handleDateChange(datePickerId, date)}
         />
       )}
+
+      {/* ─── CASCADE CONFIRM ─── */}
+      {cascadeConfirm && (
+        <div style={S.backdrop} onClick={() => setCascadeConfirm(null)}>
+          <div style={{ ...S.modal, maxWidth: 400 }} onClick={(e) => e.stopPropagation()}>
+            <div style={S.mHead}>
+              <h2 style={S.mTitle}>연결된 태스크 이동</h2>
+              <button onClick={() => setCascadeConfirm(null)} style={S.mClose}>x</button>
+            </div>
+            <div style={S.mBody}>
+              <div style={{ fontSize: 13, marginBottom: 8 }}>
+                연결된 {cascadeConfirm.downstream.length}개 태스크도 같이 {cascadeConfirm.diffDays > 0 ? `+${cascadeConfirm.diffDays}` : cascadeConfirm.diffDays}일 밀까요?
+              </div>
+              <div style={{ maxHeight: 200, overflowY: 'auto', marginBottom: 10 }}>
+                {cascadeConfirm.downstream.map((dt) => (
+                  <div key={dt.id} style={{ fontSize: 11, padding: '4px 8px', borderLeft: `2px solid ${(CC[dt.category] || CC['기타']).bd}`, marginBottom: 3, display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{dt.title}</span>
+                    {dt.deadline && (
+                      <span style={{ color: '#8A7D72', fontStyle: 'italic' }}>
+                        {fD(dt.deadline)} {' -> '} {fD(shiftDateBy(dt.deadline, cascadeConfirm.diffDays))}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => applyCascade(true)} style={S.confirmBtn}>같이 밀기</button>
+                <button onClick={() => applyCascade(false)} style={{ ...S.canBtn, flex: 1, padding: '10px 14px' }}>이것만 변경</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── EDITOR MODAL ─── */}
       {editId && (
         <Editor
           task={tasks.find((t) => t.id === editId)}
@@ -304,241 +723,355 @@ export default function App() {
           allTasks={tasks}
         />
       )}
-      {syncMode && (
-        <SyncModal
-          onClose={() => setSyncMode(false)}
-          onAdd={(arr) => { addBatch(arr); setSyncMode(false); }}
-          existing={tasks}
-        />
-      )}
-      {analyzeMode && (
-        <AnalyzeModal
-          tasks={tasks}
-          onClose={() => setAnalyzeMode(false)}
-          onApply={(depsMap) => { applyDeps(depsMap); setAnalyzeMode(false); }}
-        />
+
+      {/* ─── TOAST ─── */}
+      {toast && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+          background: '#1A1613', color: '#FAF6EF', padding: '10px 18px',
+          borderRadius: 2, fontSize: 12, fontWeight: 400, zIndex: 2000,
+          display: 'flex', alignItems: 'center', gap: 12, boxShadow: '0 4px 20px rgba(0,0,0,.25)',
+          animation: 'fadeUp .2s ease-out',
+        }}>
+          <span>{toast.message}</span>
+          {toast.undoAction && (
+            <button onClick={() => { toast.undoAction!(); setToast(null); }} style={{
+              background: 'transparent', border: '1px solid #FAF6EF55', color: '#FAF6EF',
+              padding: '3px 10px', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontWeight: 500,
+            }}>
+              되돌리기
+            </button>
+          )}
+          {!toast.undoAction && undoStack.length > 0 && (
+            <button onClick={() => { undo(); setToast(null); }} style={{
+              background: 'transparent', border: '1px solid #FAF6EF55', color: '#FAF6EF',
+              padding: '3px 10px', borderRadius: 2, fontSize: 11, cursor: 'pointer', fontWeight: 500,
+            }}>
+              Cmd+Z 되돌리기
+            </button>
+          )}
+        </div>
       )}
 
       <footer style={S.footer}>
-        <span>풍성 · 은채</span>
-        <button onClick={() => { if (confirm('초기화?')) fetchTasks(); }} style={S.fLink}>
-          새로고침
-        </button>
-        <span style={{ marginLeft: 'auto', opacity: 0.5 }}>
-          v6 · {realtimeStatus === 'connected' ? '🟢 실시간' : '⏳ 연결중'}
-        </span>
+        <span>PEACER</span>
+        <button onClick={() => { if (confirm('새로고침?')) fetchTasks(); }} style={S.fLink}>새로고침</button>
+        <span style={{ marginLeft: 'auto', opacity: 0.5 }}>v9.0</span>
       </footer>
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════
-// TODAY VIEW — The Battle Plan
+// GOAL DASHBOARD — KR → Project → Next Action
+// Grove's "limiting step" made visible
 // ═══════════════════════════════════════════════════
-function TodayView({
-  tasks, enriched, critical, onEdit, onSt,
+function GoalDashboard({
+  tasks, enriched, todayDate,
+  onEdit, onCycleStatus, onMarkDone, onDateClick, onCycleOwner,
 }: {
   tasks: AppTask[];
   enriched: AppTask[];
-  critical: AppTask[];
+  todayDate: string;
   onEdit: (id: string) => void;
-  onSt: (id: string, s: string) => void;
+  onCycleStatus: (id: string) => void;
+  onMarkDone: (id: string) => void;
+  onDateClick: (id: string, e: React.MouseEvent) => void;
+  onCycleOwner: (id: string) => void;
 }) {
-  const today = new Date().toISOString().slice(0, 10);
-  const overdueItems = enriched.filter((t) => t.deadline && t.deadline < today && t.status !== 'done');
-  const todayItems = enriched.filter((t) => t.deadline === today && t.status !== 'done');
-  const thisWeek = enriched.filter((t) => {
-    if (!t.deadline || t.status === 'done') return false;
-    const d = dU(t.deadline);
-    return d > 0 && d <= 7;
-  });
+  const [expandedBlocked, setExpandedBlocked] = useState<Set<string>>(new Set());
+  const [expandedRest, setExpandedRest] = useState<Set<string>>(new Set());
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {critical.filter((t) => t.blocksCount > 0).length > 0 && (
-        <div style={S.critBox}>
-          <div style={S.critHead}>
-            <div>
-              <div style={S.critLabel}>🔥 CRITICAL PATH</div>
-              <div style={S.critTitle}>이거 안 끝내면 뒤에 전부 밀립니다</div>
-            </div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            {critical
-              .filter((t) => t.blocksCount > 0)
-              .slice(0, 5)
-              .map((t) => {
-                const c = CC[t.category] || CC['기타'];
-                return (
-                  <div key={t.id} onClick={() => onEdit(t.id)} style={S.critItem}>
-                    <div style={S.critItemLeft}>
-                      <span style={{ ...S.catB, background: c.bg, color: c.tx }}>{t.category}</span>
-                      <span style={S.critItemTitle}>{t.title}</span>
-                    </div>
-                    <div style={S.critItemRight}>
-                      <span style={S.critChain}>→ {t.blocksCount}개 밀림</span>
-                      {t.deadline && (
-                        <span style={{ ...S.critDate, color: dU(t.deadline) < 0 ? '#B84848' : '#8A7D72' }}>
-                          {fD(t.deadline)}
-                        </span>
-                      )}
-                      {t.owner && (
-                        <span
-                          style={{
-                            ...S.ownB,
-                            fontSize: 9,
-                            background: t.owner === '풍성' ? '#D4C5EA' : t.owner === '은채' ? '#EDD9C4' : '#DDD3C2',
-                            color: t.owner === '풍성' ? '#5F4B82' : t.owner === '은채' ? '#8B5A3C' : '#4A3F38',
-                          }}
-                        >
-                          {t.owner}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-        </div>
-      )}
+  type ProjectData = {
+    name: string; meta: { goal: string; emoji: string; kr?: string };
+    done: number; total: number; nextAction: AppTask | null;
+    restUnblocked: AppTask[]; blocked: AppTask[];
+    hasOverdue: boolean; allDone: boolean;
+  };
 
-      {[
-        { key: 'overdue', label: '⚠ 지연', sub: '마감일이 지났습니다', items: overdueItems, color: '#B84848' },
-        { key: 'today', label: '● 오늘', sub: '오늘 반드시', items: todayItems, color: '#5F4B82' },
-        { key: 'week', label: '→ 이번 주', sub: '7일 이내', items: thisWeek, color: '#8B5A3C' },
-      ].map(
-        (sec) =>
-          sec.items.length > 0 && (
-            <div key={sec.key} style={{ ...S.secBox, borderColor: sec.color }}>
-              <div style={{ ...S.secHead, background: sec.color + '11' }}>
-                <span style={{ ...S.secTitle, color: sec.color }}>{sec.label}</span>
-                <span style={S.secSub}>{sec.sub}</span>
-                <span style={{ ...S.secCount, color: sec.color }}>{sec.items.length}</span>
-              </div>
-              <div style={S.secBody}>
-                {sec.items.map((t) => (
-                  <MiniCard key={t.id} t={t} onEdit={() => onEdit(t.id)} onSt={(s) => onSt(t.id, s)} />
-                ))}
-              </div>
-            </div>
-          )
-      )}
-    </div>
-  );
-}
+  const data = useMemo(() => {
+    const byProject: Record<string, { all: AppTask[]; active: AppTask[] }> = {};
+    tasks.forEach(t => {
+      const p = t.project || '기타';
+      if (!byProject[p]) byProject[p] = { all: [], active: [] };
+      byProject[p].all.push(t);
+    });
+    enriched.forEach(t => {
+      const p = t.project || '기타';
+      if (!byProject[p]) byProject[p] = { all: [], active: [] };
+      byProject[p].active.push(t);
+    });
 
-function MiniCard({ t, onEdit, onSt }: { t: AppTask; onEdit: () => void; onSt: (s: string) => void }) {
-  const c = CC[t.category] || CC['기타'];
-  return (
-    <div onClick={onEdit} style={{ ...S.card, borderLeftColor: c.bd }}>
-      <div style={S.cTop}>
-        <span style={{ ...S.catB, background: c.bg, color: c.tx }}>{t.category}</span>
-        {t.project && <span style={S.projB}>{t.project}</span>}
-        {t.priority === 'high' && <span style={{ fontSize: 9 }}>🔴</span>}
-        {t.blocksCount > 0 && <span style={S.chainB}>→{t.blocksCount}</span>}
-        {t.owner && (
+    const buildProject = (name: string): ProjectData => {
+      const d = byProject[name] || { all: [], active: [] };
+      const doneCount = d.all.filter(t => t.status === 'done').length;
+      const total = d.all.length;
+      const unblocked = d.active.filter(t => t.isUnblocked).sort((a, b) => {
+        if ((b.blocksCount || 0) !== (a.blocksCount || 0)) return (b.blocksCount || 0) - (a.blocksCount || 0);
+        return dU(a.deadline) - dU(b.deadline);
+      });
+      const blocked = d.active.filter(t => !t.isUnblocked);
+      const meta = PROJECT_META[name] || { goal: '', emoji: '📌' };
+      const hasOverdue = d.all.some(t => t.deadline && t.status !== 'done' && dU(t.deadline) < 0);
+      return { name, meta, done: doneCount, total, nextAction: unblocked[0] || null, restUnblocked: unblocked.slice(1), blocked, hasOverdue, allDone: total > 0 && doneCount === total };
+    };
+
+    const krGroups = OKR.krs.map(kr => {
+      const pNames = Object.entries(PROJECT_META).filter(([, m]) => m.kr === kr).map(([n]) => n);
+      const projects = pNames.map(buildProject).filter(p => p.total > 0);
+      const td = projects.reduce((s, p) => s + p.done, 0);
+      const tt = projects.reduce((s, p) => s + p.total, 0);
+      return { kr, projects, done: td, total: tt };
+    });
+
+    const infraNames = Object.entries(PROJECT_META).filter(([, m]) => !m.kr).map(([n]) => n);
+    const infra = infraNames.map(buildProject).filter(p => p.total > 0);
+
+    return { krGroups, infra };
+  }, [tasks, enriched]);
+
+  const toggleBlocked = (name: string) => {
+    setExpandedBlocked(prev => { const n = new Set(prev); if (n.has(name)) n.delete(name); else n.add(name); return n; });
+  };
+  const toggleRest = (name: string) => {
+    setExpandedRest(prev => { const n = new Set(prev); if (n.has(name)) n.delete(name); else n.add(name); return n; });
+  };
+
+  const renderActionTask = (t: AppTask) => {
+    const isOverdue = t.deadline != null && t.deadline < todayDate;
+    const oc = ownerColors[t.owner] || ownerColors['공동'];
+    return (
+      <div
+        key={t.id}
+        onClick={() => onEdit(t.id)}
+        style={{
+          padding: '7px 10px', background: '#FAF6EF', borderRadius: 2, cursor: 'pointer',
+          borderLeft: `3px solid ${isOverdue ? '#B84848' : (t.blocksCount || 0) > 0 ? '#5F4B82' : '#A896C4'}`,
+          transition: 'all .15s', marginBottom: 2,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, fontWeight: 400, flex: 1, lineHeight: 1.4, minWidth: 0 }}>
+            {t.title}
+          </span>
           <span
-            style={{
-              ...S.ownB,
-              marginLeft: 'auto',
-              background: t.owner === '풍성' ? '#D4C5EA' : t.owner === '은채' ? '#EDD9C4' : '#DDD3C2',
-              color: t.owner === '풍성' ? '#5F4B82' : t.owner === '은채' ? '#8B5A3C' : '#4A3F38',
-            }}
+            onClick={(e) => { e.stopPropagation(); onCycleOwner(t.id); }}
+            style={{ ...S.ownB, cursor: 'pointer', background: oc.bg, color: oc.accent }}
           >
             {t.owner}
           </span>
+          {t.deadline && (
+            <span
+              onClick={(e) => { e.stopPropagation(); onDateClick(t.id, e); }}
+              style={{
+                fontSize: 10, fontFamily: "'DM Serif Display',serif", fontStyle: 'italic',
+                color: isOverdue ? '#B84848' : '#8A7D72', cursor: 'pointer',
+                background: isOverdue ? '#FBEDEA' : 'transparent',
+                padding: '1px 6px', borderRadius: 100,
+                border: isOverdue ? '1px solid #D4A4A4' : '1px solid #E8DFCE',
+              }}
+            >
+              {fD(t.deadline)}
+              <span style={{ fontSize: 8, marginLeft: 3 }}>
+                {dU(t.deadline) < 0 ? `D+${Math.abs(dU(t.deadline))}` : dU(t.deadline) === 0 ? 'TODAY' : `D-${dU(t.deadline)}`}
+              </span>
+            </span>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+            <span
+              onClick={(e) => { e.stopPropagation(); onCycleStatus(t.id); }}
+              style={{ ...S.stBadge, background: SC[t.status]?.bg, color: SC[t.status]?.tx, border: `1px solid ${SC[t.status]?.bd}`, cursor: 'pointer' }}
+            >
+              {SL[t.status]}
+            </span>
+            <span
+              onClick={(e) => { e.stopPropagation(); onMarkDone(t.id); }}
+              style={{ width: 18, height: 18, borderRadius: 2, border: '1.5px solid #A8C496', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 10, color: '#A8C496' }}
+            >✓</span>
+          </div>
+        </div>
+        {((t.blocksCount || 0) > 0 || isOverdue) && (
+          <div style={{ display: 'flex', gap: 8, marginTop: 3 }}>
+            {(t.blocksCount || 0) > 0 && <span style={{ fontSize: 10, color: '#5F4B82', fontWeight: 500 }}>이거 끝나야 {t.blocksCount}개 진행</span>}
+            {isOverdue && <span style={{ fontSize: 10, color: '#B84848', fontWeight: 500 }}>D+{Math.abs(dU(t.deadline))} 지연</span>}
+          </div>
         )}
       </div>
-      <div style={S.cTitle}>{t.title}</div>
-      {t.note && <div style={S.cNote}>{t.note}</div>}
-      <div style={S.cBot}>
-        {t.deadline && <span style={{ ...S.cDate, color: dU(t.deadline) < 0 ? '#B84848' : '#8A7D72' }}>{fD(t.deadline)}</span>}
-        <select
-          value={t.status}
-          onClick={(e) => e.stopPropagation()}
-          onChange={(e) => { e.stopPropagation(); onSt(e.target.value); }}
-          style={{ ...S.stSel, background: SC[t.status]?.bg, color: SC[t.status]?.tx }}
-        >
-          {STS.map((s) => (
-            <option key={s} value={s}>{SL[s]}</option>
-          ))}
-        </select>
+    );
+  };
+
+  const renderProject = (proj: ProjectData) => {
+    const pct = proj.total > 0 ? Math.round((proj.done / proj.total) * 100) : 0;
+    const isBlockedOpen = expandedBlocked.has(proj.name);
+    const isRestOpen = expandedRest.has(proj.name);
+
+    return (
+      <div key={proj.name} style={{ marginLeft: 8, marginBottom: 8 }}>
+        {/* Project header */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <span style={{ fontSize: 15 }}>{proj.meta.emoji}</span>
+          <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13, color: '#1A1613', flex: 1 }}>
+            {proj.name}
+          </span>
+          <div style={{ width: 50, height: 3, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
+            <div style={{ width: `${pct}%`, height: '100%', background: proj.allDone ? '#A8C496' : proj.hasOverdue ? '#B84848' : '#5F4B82', borderRadius: 100, transition: 'width .5s' }} />
+          </div>
+          <span style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic', minWidth: 28 }}>{proj.done}/{proj.total}</span>
+          {proj.allDone && <span style={{ fontSize: 10, color: '#A8C496', fontWeight: 500 }}>완료!</span>}
+        </div>
+
+        {/* Goal */}
+        {proj.meta.goal && !proj.allDone && (
+          <div style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic', marginLeft: 27, marginBottom: 4 }}>
+            {proj.meta.goal}
+          </div>
+        )}
+
+        {/* Next action — the limiting step */}
+        {proj.nextAction && (
+          <div style={{ marginLeft: 23 }}>
+            <div style={{ fontSize: 10, color: '#5F4B82', fontWeight: 500, marginBottom: 2 }}>→ 지금:</div>
+            {renderActionTask(proj.nextAction)}
+          </div>
+        )}
+
+        {/* Other unblocked tasks */}
+        {proj.restUnblocked.length > 0 && (
+          <div style={{ marginLeft: 23, marginTop: 2 }}>
+            <button
+              onClick={() => toggleRest(proj.name)}
+              style={{ background: 'transparent', border: 'none', padding: '2px 0', fontSize: 10, color: '#5F4B82', cursor: 'pointer' }}
+            >
+              + {proj.restUnblocked.length}개 더 가능 {isRestOpen ? '−' : '+'}
+            </button>
+            {isRestOpen && proj.restUnblocked.map(t => renderActionTask(t))}
+          </div>
+        )}
+
+        {/* Blocked tasks */}
+        {proj.blocked.length > 0 && (
+          <div style={{ marginLeft: 23, marginTop: 2 }}>
+            <button
+              onClick={() => toggleBlocked(proj.name)}
+              style={{ background: 'transparent', border: 'none', padding: '2px 0', fontSize: 10, color: '#8A7D72', cursor: 'pointer', fontStyle: 'italic' }}
+            >
+              ⏸ {proj.blocked.length}개 대기 (선행 완료 후) {isBlockedOpen ? '−' : '+'}
+            </button>
+            {isBlockedOpen && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 2 }}>
+                {proj.blocked.map(t => {
+                  const depNames = (t.dependsOn || []).map(depId => {
+                    const dep = tasks.find(x => x.id === depId);
+                    return dep ? dep.title : '';
+                  }).filter(Boolean);
+                  return (
+                    <div
+                      key={t.id}
+                      onClick={() => onEdit(t.id)}
+                      style={{ fontSize: 11, color: '#8A7D72', padding: '4px 8px', cursor: 'pointer', borderLeft: '2px solid #E8DFCE', background: '#FDFBF7', borderRadius: 2 }}
+                    >
+                      <span>{t.title}</span>
+                      {t.deadline && <span style={{ fontSize: 9, marginLeft: 6, fontStyle: 'italic' }}>{fD(t.deadline)}</span>}
+                      {depNames.length > 0 && (
+                        <div style={{ fontSize: 9, color: '#AAA49C', marginTop: 1 }}>← {depNames.join(', ')}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* All done message */}
+        {proj.allDone && (
+          <div style={{ marginLeft: 27, fontSize: 11, color: '#A8C496', fontStyle: 'italic' }}>모든 태스크 완료</div>
+        )}
+
+        {/* No active and no blocked = no tasks at all besides done */}
+        {!proj.allDone && !proj.nextAction && proj.restUnblocked.length === 0 && proj.blocked.length === 0 && (
+          <div style={{ marginLeft: 27, fontSize: 11, color: '#8A7D72', fontStyle: 'italic' }}>태스크 없음</div>
+        )}
       </div>
+    );
+  };
+
+  return (
+    <div style={{ margin: '0 14px', background: 'linear-gradient(135deg, #FAF6EF, #F0E9DB)', border: '1px solid #DDD3C2', borderRadius: 2, padding: '14px 16px' }}>
+      {/* Objective */}
+      <div style={{ fontFamily: "'DM Serif Display',serif", fontSize: 11, letterSpacing: '.2em', color: '#5F4B82', marginBottom: 4 }}>OUR GOAL</div>
+      <div style={{ fontSize: 15, fontWeight: 400, color: '#1A1613', marginBottom: 16 }}>{OKR.objective}</div>
+
+      {/* KR Groups */}
+      {data.krGroups.map((krGroup, i) => {
+        const pct = krGroup.total > 0 ? Math.round((krGroup.done / krGroup.total) * 100) : 0;
+        const allKrDone = krGroup.total > 0 && krGroup.done === krGroup.total;
+        return (
+          <div key={i} style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, borderBottom: '1px solid #E8DFCE', paddingBottom: 6 }}>
+              <span style={{ fontSize: 12 }}>
+                {allKrDone ? '🟢' : krGroup.projects.some(p => p.hasOverdue) ? '🔴' : '⚪'}
+              </span>
+              <div style={{ flex: 1, fontSize: 12, fontWeight: 400, color: '#1A1613' }}>{krGroup.kr}</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 60, height: 3, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: allKrDone ? '#A8C496' : krGroup.projects.some(p => p.hasOverdue) ? '#B84848' : '#5F4B82', borderRadius: 100, transition: 'width .5s' }} />
+                </div>
+                <span style={{ fontSize: 10, color: '#8A7D72', minWidth: 30 }}>{krGroup.done}/{krGroup.total}</span>
+              </div>
+            </div>
+            {krGroup.projects.map(renderProject)}
+            {krGroup.projects.length === 0 && (
+              <div style={{ marginLeft: 20, fontSize: 11, color: '#AAA49C', fontStyle: 'italic' }}>연결된 프로젝트 없음</div>
+            )}
+          </div>
+        );
+      })}
+
+      {/* Infrastructure */}
+      {data.infra.length > 0 && (
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, borderBottom: '1px solid #E8DFCE', paddingBottom: 6 }}>
+            <span style={{ fontSize: 12 }}>🔧</span>
+            <div style={{ fontSize: 12, fontWeight: 400, color: '#1A1613' }}>인프라 (KR 직접 연결 없음)</div>
+          </div>
+          {data.infra.map(renderProject)}
+        </div>
+      )}
     </div>
   );
 }
 
 // ═══════════════════════════════════════════════════
-// PROJECT VIEW
+// PERSON SUMMARY — compact bar for each person
 // ═══════════════════════════════════════════════════
-function ProjectView({ tasks, allTasks, onEdit }: { tasks: AppTask[]; allTasks: AppTask[]; onEdit: (id: string) => void }) {
-  const tree: Record<string, Record<string, AppTask[]>> = {};
-  tasks.forEach((t) => {
-    const cat = t.category || '기타';
-    const proj = t.project || '기타';
-    if (!tree[cat]) tree[cat] = {};
-    if (!tree[cat][proj]) tree[cat][proj] = [];
-    tree[cat][proj].push(t);
-  });
+function PersonSummary({ tasks, enriched, todayDate }: { tasks: AppTask[]; enriched: AppTask[]; todayDate: string }) {
+  void tasks; // all tasks available if needed
+  const getSummary = (owner: string) => {
+    const mine = enriched.filter(t => t.owner === owner || (t.owner === '공동'));
+    const thisWeek = mine.filter(t => t.deadline && dU(t.deadline) >= 0 && dU(t.deadline) <= 6);
+    const bottlenecks = mine.filter(t => (t.blocksCount || 0) > 0);
+    const overdue = mine.filter(t => t.deadline && t.deadline < todayDate);
+    const total = mine.length;
+    return { total, thisWeek: thisWeek.length, bottlenecks: bottlenecks.length, overdue: overdue.length };
+  };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <div style={S.catProgress}>
-        {CATS.map((cat) => {
-          const items = allTasks.filter((t) => t.category === cat);
-          if (!items.length) return null;
-          const d = items.filter((t) => t.status === 'done').length;
-          const pct = Math.round((d / items.length) * 100);
-          return (
-            <div key={cat} style={S.catProgressItem}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ ...S.catB, background: CC[cat].bg, color: CC[cat].tx, fontSize: 9 }}>{cat}</span>
-                <span style={S.cpPct}>{pct}%</span>
-                <span style={S.cpCount}>{d}/{items.length}</span>
-              </div>
-              <div style={S.cpBar}><div style={{ ...S.cpBarIn, width: `${pct}%`, background: CC[cat].bd }} /></div>
-            </div>
-          );
-        }).filter(Boolean)}
-      </div>
-
-      {Object.entries(tree).map(([cat, projects]) => {
-        const c = CC[cat] || CC['기타'];
-        const catItems = Object.values(projects).flat();
-        const catDone = catItems.filter((t) => t.status === 'done').length;
+    <div style={{ display: 'flex', gap: 8, margin: '0 14px' }}>
+      {OWNERS.filter(o => o !== '공동').map(owner => {
+        const s = getSummary(owner);
+        const oc = ownerColors[owner] || ownerColors['공동'];
         return (
-          <div key={cat} style={{ ...S.treeBox, borderColor: c.bd }}>
-            <div style={{ ...S.treeCatHead, background: c.bg }}>
-              <span style={{ ...S.treeCatName, color: c.tx }}>{cat}</span>
-              <span style={{ ...S.treeCatCount, color: c.tx }}>{catDone}/{catItems.length}</span>
+          <div key={owner} style={{
+            flex: 1, padding: '8px 12px', background: '#FAF6EF', borderRadius: 2,
+            borderLeft: `3px solid ${oc.accent}`, display: 'flex', alignItems: 'center', gap: 8,
+          }}>
+            <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13, color: oc.accent }}>{owner}</span>
+            <div style={{ fontSize: 10, color: '#8A7D72' }}>
+              {s.total}개 진행
+              {s.bottlenecks > 0 && <span style={{ color: '#5F4B82' }}> · 병목 {s.bottlenecks}</span>}
+              {s.overdue > 0 && <span style={{ color: '#B84848' }}> · 지연 {s.overdue}</span>}
             </div>
-            {Object.entries(projects).map(([proj, items]) => {
-              const pDone = items.filter((t) => t.status === 'done').length;
-              const pPct = Math.round((pDone / items.length) * 100);
-              return (
-                <div key={proj} style={S.treeProjBox}>
-                  <div style={S.treeProjHead}>
-                    <span style={S.treeProjName}>{proj}</span>
-                    <div style={S.treeProjBar}><div style={{ ...S.cpBarIn, width: `${pPct}%`, background: c.bd }} /></div>
-                    <span style={S.treeProjCount}>{pDone}/{items.length}</span>
-                  </div>
-                  <div style={S.treeProjBody}>
-                    {items.sort((a, b) => dU(a.deadline) - dU(b.deadline)).map((t) => (
-                      <div key={t.id} onClick={() => onEdit(t.id)} style={{ ...S.treeItem, opacity: t.status === 'done' ? 0.5 : 1, borderLeftColor: t.status === 'done' ? c.bd + '55' : c.bd }}>
-                        <span style={{ ...S.stBadge, background: SC[t.status]?.bg, color: SC[t.status]?.tx }}>{SL[t.status]}</span>
-                        <span style={{ flex: 1, fontSize: 12, textDecoration: t.status === 'done' ? 'line-through' : 'none' }}>{t.title}</span>
-                        {t.owner && (
-                          <span style={{ ...S.ownB, fontSize: 9, background: t.owner === '풍성' ? '#D4C5EA' : t.owner === '은채' ? '#EDD9C4' : '#DDD3C2', color: t.owner === '풍성' ? '#5F4B82' : t.owner === '은채' ? '#8B5A3C' : '#4A3F38' }}>
-                            {t.owner}
-                          </span>
-                        )}
-                        {t.deadline && <span style={{ fontSize: 10, color: dU(t.deadline) < 0 ? '#B84848' : '#8A7D72', fontStyle: 'italic' }}>{fD(t.deadline)}</span>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
           </div>
         );
       })}
@@ -547,14 +1080,430 @@ function ProjectView({ tasks, allTasks, onEdit }: { tasks: AppTask[]; allTasks: 
 }
 
 // ═══════════════════════════════════════════════════
-// BOARD VIEW
+// COLLAPSIBLE SECTION
 // ═══════════════════════════════════════════════════
-function BoardView({
-  tasks, onEdit, onSt, dragId, dragCol, onDS, onDO, onDD, onDE,
+function CollapsibleSection({
+  title, sectionKey, collapsed, onToggle, children,
+}: {
+  title: string;
+  sectionKey: string;
+  collapsed: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ ...S.section, marginBottom: 8 }}>
+      <button onClick={onToggle} style={S.sectionHead}>
+        <span style={S.sectionTitle}>{title}</span>
+        <span style={S.sectionToggle}>{collapsed ? '펼치기 +' : '접기 -'}</span>
+      </button>
+      {!collapsed && <div style={S.sectionBody}>{children}</div>}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// WEEKLY GRID — simple week view Mon-Sun
+// ═══════════════════════════════════════════════════
+function WeeklyGrid({
+  tasks, onEdit, onDateChange,
 }: {
   tasks: AppTask[];
   onEdit: (id: string) => void;
-  onSt: (id: string, s: string) => void;
+  onDateChange: (taskId: string, newDate: string) => void;
+}) {
+  const weekDays = useMemo(() => getWeekDays(), []);
+  const activeTasks = tasks.filter((t) => t.status !== 'done');
+  const [dragOver, setDragOver] = useState<string | null>(null);
+  const todayS = todayStr();
+
+  // Group tasks by day
+  const tasksByDay: Record<string, AppTask[]> = {};
+  weekDays.forEach(d => { tasksByDay[d.str] = []; });
+  activeTasks.forEach(t => {
+    if (t.deadline) {
+      const matchDay = weekDays.find(d => d.str === t.deadline);
+      if (matchDay) {
+        tasksByDay[matchDay.str].push(t);
+      }
+    }
+  });
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', minWidth: 500, gap: 0 }}>
+        {/* Header row */}
+        {weekDays.map((d) => (
+          <div
+            key={d.str}
+            style={{
+              padding: '6px 4px',
+              textAlign: 'center' as const,
+              background: d.str === todayS ? '#EFEBFA' : '#FAF6EF',
+              fontWeight: d.str === todayS ? 600 : 400,
+              color: d.str === todayS ? '#5F4B82' : '#8A7D72',
+              borderRight: '1px solid #E8DFCE',
+              borderBottom: '1px solid #E8DFCE',
+            }}
+          >
+            <div style={{ fontSize: 10 }}>{d.label}</div>
+            <div style={{ fontFamily: "'DM Serif Display',serif", fontSize: 15 }}>{d.date.getDate()}</div>
+          </div>
+        ))}
+
+        {/* Day columns content */}
+        {weekDays.map((d) => {
+          const dayTasks = tasksByDay[d.str] || [];
+          const isOver = dragOver === d.str;
+          return (
+            <div
+              key={`body-${d.str}`}
+              style={{
+                padding: '4px 3px',
+                borderRight: '1px solid #E8DFCE',
+                background: isOver ? '#EFEBFA' : d.str === todayS ? '#FDFBF7' : '#fff',
+                minHeight: 60,
+                display: 'flex', flexDirection: 'column', gap: 2,
+              }}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(d.str); }}
+              onDragLeave={() => setDragOver(null)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(null);
+                const taskId = e.dataTransfer.getData('text/plain');
+                if (taskId) onDateChange(taskId, d.str);
+              }}
+            >
+              {dayTasks.map((t) => {
+                const oc = ownerColors[t.owner] || ownerColors['공동'];
+                return (
+                  <div
+                    key={t.id}
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData('text/plain', t.id); }}
+                    onClick={() => onEdit(t.id)}
+                    style={{
+                      fontSize: 10, padding: '3px 5px',
+                      background: t.owner === '풍성' ? '#F3EEFA' : t.owner === '은채' ? '#FDF5ED' : '#F5F1EA',
+                      borderLeft: `2px solid ${oc.accent}`,
+                      borderRadius: 2, cursor: 'grab',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      color: '#1A1613',
+                      lineHeight: 1.4,
+                    }}
+                    title={`${t.owner}: ${t.title}`}
+                  >
+                    <span style={{ fontSize: 8, color: oc.accent, fontWeight: 600, marginRight: 2 }}>
+                      {t.owner === '풍성' ? '풍' : t.owner === '은채' ? '은' : '공'}
+                    </span>
+                    {t.priority === 'high' && <span style={{ color: '#B84848' }}>! </span>}
+                    {t.title}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// PROJECT CARDS — sorted by most active
+// ═══════════════════════════════════════════════════
+function ProjectCards({
+  projects, expandedProjects, onToggleExpand, onEdit, onCycleStatus, onMarkDone, onDateClick,
+}: {
+  projects: { name: string; category: string; items: AppTask[]; done: number; total: number; active: number; primaryOwner: string; isNew: boolean }[];
+  expandedProjects: Set<string>;
+  onToggleExpand: (name: string) => void;
+  onEdit: (id: string) => void;
+  onCycleStatus: (id: string) => void;
+  onMarkDone: (id: string) => void;
+  onDateClick: (id: string, e: React.MouseEvent) => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      {projects.map((proj) => {
+        const emoji = PROJECT_META[proj.name]?.emoji || catEmoji[proj.category] || '📌';
+        const pct = proj.total > 0 ? Math.round((proj.done / proj.total) * 100) : 0;
+        const oc = ownerColors[proj.primaryOwner] || ownerColors['공동'];
+        const isExpanded = expandedProjects.has(proj.name);
+        const c = CC[proj.category] || CC['기타'];
+
+        return (
+          <div key={proj.name} style={{ border: '1px solid #E8DFCE', borderRadius: 2, overflow: 'hidden' }}>
+            {/* Compact project card */}
+            <div
+              onClick={() => onToggleExpand(proj.name)}
+              style={{
+                padding: '8px 12px',
+                display: 'flex', alignItems: 'center', gap: 8,
+                cursor: 'pointer',
+                background: isExpanded ? '#FAF6EF' : '#fff',
+                transition: 'background .15s',
+              }}
+            >
+              <span style={{ fontSize: 14 }}>{emoji}</span>
+              <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13, flex: 1 }}>
+                {proj.name}
+                {PROJECT_META[proj.name]?.goal && (
+                  <div style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic', marginTop: 1 }}>
+                    🎯 {PROJECT_META[proj.name].goal}
+                  </div>
+                )}
+              </span>
+              {proj.isNew && (
+                <span style={{
+                  fontSize: 8, padding: '1px 5px', borderRadius: 100,
+                  background: '#EFEBFA', color: '#5F4B82', fontWeight: 600,
+                  letterSpacing: '.05em',
+                }}>
+                  NEW
+                </span>
+              )}
+              {/* Progress bar */}
+              <div style={{ width: 60, height: 4, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${pct}%`, background: c.bd, borderRadius: 100, transition: 'width .5s ease' }} />
+              </div>
+              <span style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic', minWidth: 28 }}>
+                {proj.done}/{proj.total}
+              </span>
+              <span style={{
+                fontSize: 9, padding: '1px 5px', borderRadius: 100,
+                background: oc.bg, color: oc.accent, fontWeight: 500,
+              }}>
+                {proj.primaryOwner}
+              </span>
+              <span style={{ fontSize: 10, color: '#8A7D72', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .15s' }}>
+                →
+              </span>
+            </div>
+
+            {/* Expanded task list */}
+            {isExpanded && (
+              <div style={{ padding: '4px 8px 8px', borderTop: '1px solid #E8DFCE', background: '#FDFBF7' }}>
+                {proj.items
+                  .sort((a, b) => {
+                    // Active tasks first, then by deadline
+                    if (a.status === 'done' && b.status !== 'done') return 1;
+                    if (a.status !== 'done' && b.status === 'done') return -1;
+                    return dU(a.deadline) - dU(b.deadline);
+                  })
+                  .map((t) => {
+                    const isDone = t.status === 'done';
+                    const tOc = ownerColors[t.owner] || ownerColors['공동'];
+                    return (
+                      <div
+                        key={t.id}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '5px 8px', marginBottom: 2,
+                          borderLeft: `2px solid ${isDone ? '#A8C49655' : c.bd}`,
+                          borderRadius: 2, cursor: 'pointer',
+                          opacity: isDone ? 0.5 : 1,
+                          transition: 'all .1s',
+                        }}
+                        onClick={() => onEdit(t.id)}
+                      >
+                        {/* Status circle */}
+                        <span
+                          onClick={(e) => { e.stopPropagation(); onCycleStatus(t.id); }}
+                          style={{
+                            width: 12, height: 12, borderRadius: '50%',
+                            border: `1.5px solid ${isDone ? '#A8C496' : SC[t.status]?.bd || '#DDD3C2'}`,
+                            background: isDone ? '#A8C496' : 'transparent',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            cursor: 'pointer', fontSize: 7, color: '#fff', flexShrink: 0,
+                          }}
+                        >
+                          {isDone ? '✓' : ''}
+                        </span>
+                        <span style={{
+                          flex: 1, fontSize: 12,
+                          textDecoration: isDone ? 'line-through' : 'none',
+                          color: isDone ? '#8A7D72' : '#1A1613',
+                        }}>
+                          {t.title}
+                        </span>
+                        {t.deadline && (
+                          <span
+                            onClick={(e) => { e.stopPropagation(); onDateClick(t.id, e); }}
+                            style={{
+                              fontSize: 10, color: dU(t.deadline) < 0 ? '#B84848' : '#8A7D72',
+                              fontStyle: 'italic', cursor: 'pointer',
+                            }}
+                          >
+                            {fD(t.deadline)}
+                          </span>
+                        )}
+                        <span style={{
+                          fontSize: 9, padding: '1px 5px', borderRadius: 100,
+                          background: tOc.bg, color: tOc.accent,
+                        }}>
+                          {t.owner}
+                        </span>
+                        {!isDone && (
+                          <span
+                            onClick={(e) => { e.stopPropagation(); onMarkDone(t.id); }}
+                            style={{
+                              width: 16, height: 16, borderRadius: 2,
+                              border: '1.5px solid #A8C496', display: 'flex',
+                              alignItems: 'center', justifyContent: 'center',
+                              cursor: 'pointer', fontSize: 9, color: '#A8C496',
+                              flexShrink: 0,
+                            }}
+                            title="완료"
+                          >
+                            ✓
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// INLINE DATE PICKER
+// ═══════════════════════════════════════════════════
+function DatePicker({
+  task, pos, onClose, onDateChange,
+}: {
+  task: AppTask;
+  pos: { top: number; left: number };
+  onClose: () => void;
+  onDateChange: (date: string) => void;
+}) {
+  const [month, setMonth] = useState(() => {
+    const d = task.deadline ? new Date(task.deadline + 'T00:00:00') : new Date();
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+
+  const firstDay = new Date(month.year, month.month, 1);
+  const startDay = firstDay.getDay();
+  const daysInMonth = new Date(month.year, month.month + 1, 0).getDate();
+  const todayS = todayStr();
+
+  const cells: (string | null)[] = [];
+  for (let i = 0; i < startDay; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${month.year}-${String(month.month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    cells.push(dateStr);
+  }
+
+  const quickButtons = [
+    { label: '+1일', fn: () => { if (task.deadline) { const d = new Date(task.deadline + 'T00:00:00'); d.setDate(d.getDate() + 1); onDateChange(d.toISOString().slice(0, 10)); } } },
+    { label: '+3일', fn: () => { if (task.deadline) { const d = new Date(task.deadline + 'T00:00:00'); d.setDate(d.getDate() + 3); onDateChange(d.toISOString().slice(0, 10)); } } },
+    { label: '+7일', fn: () => { if (task.deadline) { const d = new Date(task.deadline + 'T00:00:00'); d.setDate(d.getDate() + 7); onDateChange(d.toISOString().slice(0, 10)); } } },
+    { label: '내일', fn: () => { const d = new Date(); d.setDate(d.getDate() + 1); onDateChange(d.toISOString().slice(0, 10)); } },
+    { label: '이번주말', fn: () => {
+      const d = new Date();
+      const day = d.getDay();
+      const diff = day === 0 ? 6 : 6 - day;
+      d.setDate(d.getDate() + diff);
+      onDateChange(d.toISOString().slice(0, 10));
+    }},
+  ];
+
+  const popupTop = pos.top > window.innerHeight / 2 ? Math.max(10, pos.top - 320) : pos.top + 10;
+  const popupLeft = Math.min(pos.left, window.innerWidth - 260);
+
+  return (
+    <div style={S.backdrop} onClick={onClose}>
+      <div
+        style={{
+          position: 'fixed',
+          top: popupTop,
+          left: popupLeft,
+          background: '#FAF6EF',
+          border: '1px solid #DDD3C2',
+          borderRadius: 2,
+          padding: 12,
+          width: 250,
+          boxShadow: '0 8px 24px rgba(26,22,19,.15)',
+          zIndex: 1010,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Quick buttons */}
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 10 }}>
+          {quickButtons.map((b) => (
+            <button key={b.label} onClick={b.fn} style={S.dpQuick}>{b.label}</button>
+          ))}
+        </div>
+
+        {/* Month nav */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <button onClick={() => setMonth((p) => p.month === 0 ? { year: p.year - 1, month: 11 } : { ...p, month: p.month - 1 })} style={S.dpNav}>&lt;</button>
+          <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13 }}>
+            {month.year}.{month.month + 1}
+          </span>
+          <button onClick={() => setMonth((p) => p.month === 11 ? { year: p.year + 1, month: 0 } : { ...p, month: p.month + 1 })} style={S.dpNav}>&gt;</button>
+        </div>
+
+        {/* Day headers */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1, marginBottom: 4 }}>
+          {['일', '월', '화', '수', '목', '금', '토'].map((d) => (
+            <div key={d} style={{ textAlign: 'center', fontSize: 9, color: '#8A7D72', padding: 2 }}>{d}</div>
+          ))}
+        </div>
+
+        {/* Days grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1 }}>
+          {cells.map((dateStr, i) => {
+            if (!dateStr) return <div key={i} />;
+            const dayNum = parseInt(dateStr.split('-')[2]);
+            const isToday = dateStr === todayS;
+            const isSelected = dateStr === task.deadline;
+            return (
+              <button
+                key={dateStr}
+                onClick={() => onDateChange(dateStr)}
+                style={{
+                  border: 'none',
+                  background: isSelected ? '#5F4B82' : isToday ? '#EFEBFA' : 'transparent',
+                  color: isSelected ? '#fff' : isToday ? '#5F4B82' : '#1A1613',
+                  padding: '4px 0',
+                  borderRadius: 2,
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  fontWeight: isToday ? 600 : 300,
+                }}
+              >
+                {dayNum}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// BOARD VIEW (Kanban)
+// ═══════════════════════════════════════════════════
+function BoardView({
+  tasks, selectMode, selectedIds, onSelect, onEdit, onCycleStatus, onCycleOwner, onCyclePriority, onMarkDone, onDateClick, dragId, dragCol, onDS, onDO, onDD, onDE,
+}: {
+  tasks: AppTask[];
+  selectMode: boolean;
+  selectedIds: Set<string>;
+  onSelect: (id: string) => void;
+  onEdit: (id: string) => void;
+  onCycleStatus: (id: string) => void;
+  onCycleOwner: (id: string) => void;
+  onCyclePriority: (id: string) => void;
+  onMarkDone: (id: string) => void;
+  onDateClick: (id: string, e: React.MouseEvent) => void;
   dragId: string | null;
   dragCol: string | null;
   onDS: (id: string) => void;
@@ -587,458 +1536,88 @@ function BoardView({
               <span style={{ color: sc.tx, fontFamily: "'DM Serif Display',serif", fontSize: 18 }}>{items.length}</span>
             </div>
             <div style={S.colB}>
-              {items.map((t) => (
-                <div
-                  key={t.id}
-                  draggable
-                  onDragStart={() => onDS(t.id)}
-                  onDragEnd={onDE}
-                  onClick={() => onEdit(t.id)}
-                  style={{
-                    ...S.card,
-                    borderLeftColor: (CC[t.category] || CC['기타']).bd,
-                    opacity: dragId === t.id ? 0.35 : t.status === 'done' ? 0.5 : 1,
-                    cursor: 'grab',
-                  }}
-                >
-                  <div style={S.cTop}>
-                    <span style={{ ...S.catB, background: (CC[t.category] || CC['기타']).bg, color: (CC[t.category] || CC['기타']).tx }}>{t.category}</span>
-                    {t.priority === 'high' && <span style={{ fontSize: 9 }}>🔴</span>}
-                    {t.owner && (
-                      <span style={{ ...S.ownB, marginLeft: 'auto', background: t.owner === '풍성' ? '#D4C5EA' : t.owner === '은채' ? '#EDD9C4' : '#DDD3C2', color: t.owner === '풍성' ? '#5F4B82' : t.owner === '은채' ? '#8B5A3C' : '#4A3F38' }}>
+              {items.map((t) => {
+                const c = CC[t.category] || CC['기타'];
+                return (
+                  <div
+                    key={t.id}
+                    draggable
+                    onDragStart={() => onDS(t.id)}
+                    onDragEnd={onDE}
+                    onClick={() => selectMode ? onSelect(t.id) : onEdit(t.id)}
+                    style={{
+                      ...S.card,
+                      borderLeftColor: c.bd,
+                      opacity: dragId === t.id ? 0.35 : t.status === 'done' ? 0.5 : 1,
+                      cursor: 'grab',
+                      outline: selectedIds.has(t.id) ? '2px solid #5F4B82' : 'none',
+                    }}
+                  >
+                    <div style={S.cTop}>
+                      {selectMode && (
+                        <span style={{ ...S.pChk, width: 14, height: 14, background: selectedIds.has(t.id) ? '#5F4B82' : 'transparent', borderColor: selectedIds.has(t.id) ? '#5F4B82' : '#DDD3C2', color: '#fff', fontSize: 8 }}>
+                          {selectedIds.has(t.id) ? '✓' : ''}
+                        </span>
+                      )}
+                      <span style={{ ...S.catB, background: c.bg, color: c.tx }}>{t.category}</span>
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onCyclePriority(t.id); }}
+                        style={{ fontSize: 9, cursor: 'pointer' }}
+                      >
+                        {t.priority === 'high' ? '🔴' : t.priority === 'low' ? '🔵' : '⚪'}
+                      </span>
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onCycleOwner(t.id); }}
+                        style={{
+                          ...S.ownB, marginLeft: 'auto', cursor: 'pointer',
+                          background: ownerColors[t.owner]?.bg || ownerColors['공동'].bg,
+                          color: ownerColors[t.owner]?.accent || ownerColors['공동'].accent,
+                        }}
+                      >
                         {t.owner}
                       </span>
-                    )}
+                    </div>
+                    <div style={{ ...S.cTitle, textDecoration: t.status === 'done' ? 'line-through' : 'none' }}>{t.title}</div>
+                    <div style={S.cBot}>
+                      {t.deadline ? (
+                        <span
+                          onClick={(e) => { e.stopPropagation(); onDateClick(t.id, e); }}
+                          style={{ ...S.cDate, color: dU(t.deadline) < 0 ? '#B84848' : '#8A7D72', cursor: 'pointer' }}
+                        >
+                          {fD(t.deadline)}
+                        </span>
+                      ) : (
+                        <span
+                          onClick={(e) => { e.stopPropagation(); onDateClick(t.id, e); }}
+                          style={{ fontSize: 10, color: '#CCBFA8', cursor: 'pointer' }}
+                        >
+                          +날짜
+                        </span>
+                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
+                        <span
+                          onClick={(e) => { e.stopPropagation(); onCycleStatus(t.id); }}
+                          style={{ ...S.stBadge, background: SC[t.status]?.bg, color: SC[t.status]?.tx, border: `1px solid ${SC[t.status]?.bd}`, cursor: 'pointer' }}
+                        >
+                          {SL[t.status]}
+                        </span>
+                        {t.status !== 'done' && (
+                          <span
+                            onClick={(e) => { e.stopPropagation(); onMarkDone(t.id); }}
+                            style={{ width: 16, height: 16, borderRadius: 2, border: '1.5px solid #A8C496', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 9, color: '#A8C496' }}
+                            title="완료"
+                          >✓</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div style={S.cTitle}>{t.title}</div>
-                  <div style={S.cBot}>
-                    {t.deadline && <span style={{ ...S.cDate, color: dU(t.deadline) < 0 ? '#B84848' : '#8A7D72' }}>{fD(t.deadline)}</span>}
-                    <select
-                      value={t.status}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => { e.stopPropagation(); onSt(t.id, e.target.value); }}
-                      style={{ ...S.stSel, background: SC[t.status]?.bg, color: SC[t.status]?.tx }}
-                    >
-                      {STS.map((s) => (
-                        <option key={s} value={s}>{SL[s]}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              ))}
-              {!items.length && <div style={S.empty}>—</div>}
+                );
+              })}
+              {!items.length && <div style={S.empty}>--</div>}
             </div>
           </div>
         );
       })}
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════
-// ROADMAP VIEW — Gantt chart
-// ═══════════════════════════════════════════════════
-function RoadmapView({ tasks, allTasks, onEdit }: { tasks: AppTask[]; allTasks: AppTask[]; onEdit: (id: string) => void }) {
-  const withDL = tasks.filter((t) => t.deadline);
-  if (!withDL.length) return <div style={S.emptyBig}>마감일이 있는 항목이 없습니다</div>;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayStr = today.toISOString().slice(0, 10);
-  const dates = withDL.map((t) => t.deadline!).sort();
-  const minDate = new Date(Math.min(today.getTime(), new Date(dates[0] + 'T00:00:00').getTime()));
-  const maxDate = new Date(Math.max(today.getTime() + 7 * 864e5, new Date(dates[dates.length - 1] + 'T00:00:00').getTime() + 3 * 864e5));
-
-  const sd = minDate.getDay();
-  const mo = sd === 0 ? -6 : 1 - sd;
-  const gridStart = new Date(minDate);
-  gridStart.setDate(gridStart.getDate() + mo);
-  const totalDays = Math.ceil((maxDate.getTime() - gridStart.getTime()) / 864e5) + 1;
-  const dayWidth = 32;
-  const labelWidth = 160;
-  const totalWidth = labelWidth + totalDays * dayWidth;
-
-  const days: Date[] = [];
-  for (let i = 0; i < totalDays; i++) {
-    const d = new Date(gridStart);
-    d.setDate(d.getDate() + i);
-    days.push(d);
-  }
-
-  const weeks: { start: Date; end: Date; span: number }[] = [];
-  for (let i = 0; i < days.length; i += 7) {
-    const wStart = days[i];
-    const wEnd = days[Math.min(i + 6, days.length - 1)];
-    const span = Math.min(7, days.length - i);
-    weeks.push({ start: wStart, end: wEnd, span });
-  }
-
-  type GroupItem =
-    | { type: 'cat'; cat: string; total: number; done: number; pct: number }
-    | { type: 'proj'; cat: string; proj: string; total: number; done: number; pct: number }
-    | { type: 'task'; task: AppTask; cat: string };
-
-  const groups: GroupItem[] = [];
-  const tree: Record<string, Record<string, AppTask[]>> = {};
-  withDL.forEach((t) => {
-    const cat = t.category || '기타';
-    const proj = t.project || '기타';
-    if (!tree[cat]) tree[cat] = {};
-    if (!tree[cat][proj]) tree[cat][proj] = [];
-    tree[cat][proj].push(t);
-  });
-
-  CATS.forEach((cat) => {
-    if (!tree[cat]) return;
-    const projs = Object.entries(tree[cat]);
-    const catItems = projs.flatMap(([, items]) => items);
-    const catDone = catItems.filter((t) => t.status === 'done').length;
-    const catPct = Math.round((catDone / catItems.length) * 100);
-    groups.push({ type: 'cat', cat, total: catItems.length, done: catDone, pct: catPct });
-    projs.forEach(([proj, items]) => {
-      const pDone = items.filter((t) => t.status === 'done').length;
-      groups.push({ type: 'proj', cat, proj, total: items.length, done: pDone, pct: Math.round((pDone / items.length) * 100) });
-      items.sort((a, b) => (a.deadline || '').localeCompare(b.deadline || '')).forEach((t) => {
-        groups.push({ type: 'task', task: t, cat });
-      });
-    });
-  });
-
-  const dayPos = (dateStr: string) => {
-    const d = new Date(dateStr + 'T00:00:00');
-    return Math.round((d.getTime() - gridStart.getTime()) / 864e5) * dayWidth;
-  };
-  const todayPos = dayPos(todayStr);
-  const fmtDay = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`;
-  const ROW_H = 28;
-  const CAT_H = 32;
-  const PROJ_H = 26;
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-      <div style={S.catProgress}>
-        {CATS.map((cat) => {
-          const items = allTasks.filter((t) => t.category === cat);
-          if (!items.length) return null;
-          const d = items.filter((t) => t.status === 'done').length;
-          const p = Math.round((d / items.length) * 100);
-          return (
-            <div key={cat} style={S.catProgressItem}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ ...S.catB, background: CC[cat].bg, color: CC[cat].tx, fontSize: 9 }}>{cat}</span>
-                <span style={S.cpPct}>{p}%</span>
-                <span style={S.cpCount}>{d}/{items.length}</span>
-              </div>
-              <div style={S.cpBar}><div style={{ ...S.cpBarIn, width: `${p}%`, background: CC[cat].bd }} /></div>
-            </div>
-          );
-        }).filter(Boolean)}
-      </div>
-
-      <div style={{ overflowX: 'auto', border: '1px solid #E8DFCE', borderRadius: 2, background: '#fff' }}>
-        <div style={{ minWidth: totalWidth, position: 'relative' }}>
-          {/* Week header */}
-          <div style={{ display: 'flex', borderBottom: '1px solid #E8DFCE', position: 'sticky', top: 0, zIndex: 3, background: '#FAF6EF' }}>
-            <div style={{ width: labelWidth, minWidth: labelWidth, padding: '6px 10px', borderRight: '1px solid #E8DFCE', fontFamily: "'DM Serif Display',serif", fontSize: 11, color: '#5F4B82', letterSpacing: '.1em' }}>프로젝트</div>
-            <div style={{ display: 'flex', flex: 1 }}>
-              {weeks.map((w, i) => (
-                <div key={i} style={{ width: w.span * dayWidth, borderRight: '1px solid #EFE7D6', padding: '6px 4px', textAlign: 'center', fontFamily: "'DM Serif Display',serif", fontSize: 11, color: '#8A7D72' }}>
-                  {fmtDay(w.start)} — {fmtDay(w.end)}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Day header */}
-          <div style={{ display: 'flex', borderBottom: '1px solid #DDD3C2', position: 'sticky', top: 31, zIndex: 3, background: '#FDFBF7' }}>
-            <div style={{ width: labelWidth, minWidth: labelWidth, borderRight: '1px solid #E8DFCE' }} />
-            <div style={{ display: 'flex', flex: 1 }}>
-              {days.map((d, i) => {
-                const isToday = d.toISOString().slice(0, 10) === todayStr;
-                const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-                return (
-                  <div key={i} style={{ width: dayWidth, textAlign: 'center', fontSize: 9, padding: '3px 0', color: isToday ? '#5F4B82' : isWeekend ? '#C4A896' : '#AAA49C', fontWeight: isToday ? 600 : 300, background: isToday ? '#EFEBFA' : 'transparent', borderRight: '1px solid #F5F1EA' }}>
-                    {d.getDate()}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Rows */}
-          <div style={{ position: 'relative' }}>
-            <div style={{ position: 'absolute', left: labelWidth + todayPos + dayWidth / 2, top: 0, bottom: 0, width: 2, background: '#B84848', zIndex: 2, opacity: 0.6 }} />
-            {MST.map((m, mi) => {
-              const mPos = dayPos(m.date);
-              if (mPos < 0 || mPos > totalDays * dayWidth) return null;
-              return (
-                <div key={mi} style={{ position: 'absolute', left: labelWidth + mPos + dayWidth / 2, top: 0, bottom: 0, width: 2, background: m.color, zIndex: 1, opacity: 0.3 }}>
-                  <div style={{ position: 'absolute', top: -28, left: 4, fontSize: 9, color: m.color, fontWeight: 500, whiteSpace: 'nowrap', fontFamily: "'DM Serif Display',serif" }}>{m.label}</div>
-                </div>
-              );
-            })}
-
-            {groups.map((g, gi) => {
-              if (g.type === 'cat') {
-                const c = CC[g.cat] || CC['기타'];
-                return (
-                  <div key={gi} style={{ display: 'flex', height: CAT_H, borderBottom: '1px solid #E8DFCE', background: c.bg }}>
-                    <div style={{ width: labelWidth, minWidth: labelWidth, display: 'flex', alignItems: 'center', gap: 6, padding: '0 10px', borderRight: '1px solid #E8DFCE' }}>
-                      <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 12, fontWeight: 400, color: c.tx }}>{g.cat}</span>
-                      <span style={{ fontSize: 10, color: c.tx, opacity: 0.7 }}>{g.pct}%</span>
-                      <div style={{ flex: 1, height: 3, background: c.tx + '22', borderRadius: 100, overflow: 'hidden', marginLeft: 4 }}>
-                        <div style={{ width: `${g.pct}%`, height: '100%', background: c.bd, borderRadius: 100 }} />
-                      </div>
-                    </div>
-                    <div style={{ flex: 1 }} />
-                  </div>
-                );
-              }
-              if (g.type === 'proj') {
-                return (
-                  <div key={gi} style={{ display: 'flex', height: PROJ_H, borderBottom: '1px solid #EFE7D6', background: '#FDFBF7' }}>
-                    <div style={{ width: labelWidth, minWidth: labelWidth, display: 'flex', alignItems: 'center', gap: 4, padding: '0 10px 0 24px', borderRight: '1px solid #E8DFCE' }}>
-                      <span style={{ fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', fontSize: 11, color: '#4A3F38' }}>{g.proj}</span>
-                      <span style={{ fontSize: 9, color: '#8A7D72', marginLeft: 'auto' }}>{g.done}/{g.total}</span>
-                    </div>
-                    <div style={{ flex: 1 }} />
-                  </div>
-                );
-              }
-              const t = g.task;
-              const c = CC[g.cat] || CC['기타'];
-              const pos = dayPos(t.deadline!);
-              const isDone = t.status === 'done';
-              const isOv = t.deadline && !isDone && dU(t.deadline) < 0;
-              const barColor = isDone ? '#A8C496' : isOv ? '#B84848' : c.bd;
-              return (
-                <div key={gi} style={{ display: 'flex', height: ROW_H, borderBottom: '1px solid #F5F1EA', position: 'relative', cursor: 'pointer' }} onClick={() => onEdit(t.id)}>
-                  <div style={{ width: labelWidth, minWidth: labelWidth, display: 'flex', alignItems: 'center', gap: 4, padding: '0 6px 0 36px', borderRight: '1px solid #E8DFCE', overflow: 'hidden' }}>
-                    {t.priority === 'high' && <span style={{ fontSize: 8, flexShrink: 0 }}>🔴</span>}
-                    <span style={{ fontSize: 11, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', opacity: isDone ? 0.5 : 1, textDecoration: isDone ? 'line-through' : 'none', color: '#1A1613' }}>{t.title}</span>
-                  </div>
-                  <div style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center' }}>
-                    {days.map((d, di) => (d.getDay() === 0 || d.getDay() === 6) ? <div key={di} style={{ position: 'absolute', left: di * dayWidth, width: dayWidth, top: 0, bottom: 0, background: '#F5F1EA' }} /> : null)}
-                    <div style={{ position: 'absolute', left: pos, top: 6, height: ROW_H - 12, width: Math.max(dayWidth - 4, dayWidth), borderRadius: 3, background: barColor, opacity: isDone ? 0.4 : 0.85, display: 'flex', alignItems: 'center', paddingLeft: 4 }}>
-                      {t.owner && <span style={{ fontSize: 8, color: '#fff', fontWeight: 600, opacity: 0.9 }}>{t.owner === '풍성' ? '풍' : t.owner === '은채' ? '은' : '공'}</span>}
-                    </div>
-                    <div style={{ position: 'absolute', left: pos + dayWidth + 2, top: 6, fontSize: 9, color: SC[t.status]?.tx, background: SC[t.status]?.bg, padding: '1px 5px', borderRadius: 100, whiteSpace: 'nowrap' }}>{SL[t.status]}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════
-// SYNC MODAL — Text extraction via Claude API
-// ═══════════════════════════════════════════════════
-function SyncModal({
-  onClose, onAdd, existing,
-}: {
-  onClose: () => void;
-  onAdd: (arr: Partial<AppTask>[]) => void;
-  existing: AppTask[];
-}) {
-  const [text, setText] = useState('');
-  const [parsing, setParsing] = useState(false);
-  const [preview, setPreview] = useState<(Partial<AppTask> & { isDuplicate?: boolean; duplicateOf?: string; selected?: boolean })[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const parse = async () => {
-    if (!text.trim()) return;
-    setParsing(true);
-    setError(null);
-    setPreview(null);
-    try {
-      const el = existing.map((t) => `- "${t.title}"`).join('\n');
-      const res = await fetch('/api/claude', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system: `Extract actionable todos from text for Peacer (피서) shower bomb brand.\n\nEXISTING TASKS:\n${el}\n\nReturn ONLY JSON array:\n[{"title":"concise task","category":"제조|사업자/인허가|마케팅|디자인|계약|기타","project":"project name","owner":"풍성|은채|공동","deadline":"YYYY-MM-DD|null","status":"todo|doing|waiting|done","note":"","priority":"high|medium|low","isDuplicate":bool,"duplicateOf":"existing title|null"}]\n\nRules: today=${new Date().toISOString().slice(0, 10)} year=2026. ~~strikethrough~~=done. Semantically similar to existing=isDuplicate. "4/13"→"2026-04-13". Infer project names.`,
-          userMessage: `Extract:\n\n${text}`,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
-      let j = (data.content || [])
-        .filter((b: { type: string }) => b.type === 'text')
-        .map((b: { text: string }) => b.text)
-        .join('')
-        .trim()
-        .replace(/```json\s*/g, '')
-        .replace(/```\s*/g, '')
-        .trim();
-      const si = j.indexOf('[');
-      const ei = j.lastIndexOf(']');
-      if (si === -1) throw new Error('파싱 실패');
-      setPreview(
-        JSON.parse(j.slice(si, ei + 1)).map((t: Record<string, unknown>) => ({ ...t, selected: !t.isDuplicate }))
-      );
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '알 수 없는 오류');
-    }
-    setParsing(false);
-  };
-
-  const toggle = (i: number) => setPreview((p) => p?.map((t, j) => (j === i ? { ...t, selected: !t.selected } : t)) || null);
-
-  return (
-    <div style={S.backdrop} onClick={onClose}>
-      <div style={{ ...S.modal, maxWidth: 600 }} onClick={(e) => e.stopPropagation()}>
-        <div style={S.mHead}>
-          <div>
-            <div style={{ fontSize: 10, letterSpacing: '.2em', color: '#5F4B82', fontFamily: "'DM Serif Display',serif" }}>SYNC</div>
-            <h2 style={S.mTitle}>텍스트에서 할 일 추출</h2>
-          </div>
-          <button onClick={onClose} style={S.mClose}>×</button>
-        </div>
-        <div style={S.mBody}>
-          <div style={S.hint}>회의록, 카톡, 메모 등을 붙여넣으세요.</div>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} style={{ ...S.input, minHeight: 140, resize: 'vertical', lineHeight: 1.6 }} placeholder="회의 내용을 붙여넣기..." />
-          <button onClick={parse} disabled={parsing || !text.trim()} style={{ ...S.syncBtnBig, opacity: parsing || !text.trim() ? 0.5 : 1 }}>
-            {parsing ? '⏳ AI 분석 중…' : '🔍 추출하기'}
-          </button>
-          {error && <div style={{ color: '#B84848', fontSize: 12 }}>⚠ {error}</div>}
-          {preview && (
-            <div style={S.prevBox}>
-              <div style={{ fontSize: 11, color: '#5F4B82', fontWeight: 500, marginBottom: 8 }}>
-                {preview.filter((t) => t.selected).length}개 선택 · {preview.filter((t) => t.isDuplicate).length}개 중복
-              </div>
-              {preview.map((t, i) => (
-                <div key={i} onClick={() => toggle(i)} style={{ ...S.prevItem, opacity: t.selected ? 1 : 0.4, background: t.isDuplicate ? '#FFF5F5' : t.selected ? '#F5FFF5' : '#FAF6EF', borderLeftColor: t.isDuplicate ? '#D4A4A4' : CC[t.category || '기타']?.bd || '#DDD3C2' }}>
-                  <span style={{ ...S.pChk, background: t.selected ? '#5F4B82' : 'transparent', borderColor: t.selected ? '#5F4B82' : '#DDD3C2', color: '#fff' }}>
-                    {t.selected ? '✓' : ''}
-                  </span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 12 }}>{t.title}</div>
-                    <div style={{ fontSize: 10, color: '#8A7D72', marginTop: 2 }}>
-                      {t.category} · {t.project || '미정'} · {t.owner || '미정'} · {t.deadline ? fD(t.deadline) : '마감일 없음'}
-                      {t.isDuplicate && <span style={{ color: '#B84848', marginLeft: 6 }}>≈ {t.duplicateOf}</span>}
-                    </div>
-                  </div>
-                </div>
-              ))}
-              <button
-                onClick={() => {
-                  onAdd(preview.filter((t) => t.selected).map(({ isDuplicate, selected, duplicateOf, ...r }) => r));
-                }}
-                style={S.confirmBtn}
-              >
-                ✓ {preview.filter((t) => t.selected).length}개 추가
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ═══════════════════════════════════════════════════
-// AI ANALYZE MODAL
-// ═══════════════════════════════════════════════════
-function AnalyzeModal({
-  tasks, onClose, onApply,
-}: {
-  tasks: AppTask[];
-  onClose: () => void;
-  onApply: (depsMap: Record<string, string[]>) => void;
-}) {
-  const [analyzing, setAnalyzing] = useState(false);
-  const [result, setResult] = useState<{ id: string; dependsOn: string[]; reason: string }[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const analyze = async () => {
-    setAnalyzing(true);
-    setError(null);
-    try {
-      const tl = tasks
-        .filter((t) => t.status !== 'done')
-        .map((t) => `- id:"${t.id}" title:"${t.title}" category:${t.category} project:${t.project || '없음'} deadline:${t.deadline || '없음'} status:${t.status}`)
-        .join('\n');
-      const res = await fetch('/api/claude', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          system: `You analyze task dependencies for Peacer (피서) shower bomb brand.\n\nReturn ONLY JSON (no fences):\n{"dependencies":[{"id":"task_id","dependsOn":["other_task_id"],"reason":"1-line why"}]}\n\nRules:\n- Only include tasks that ACTUALLY depend on another task completing first\n- Use business logic: 사업자등록→법인설립, 향료발주→향확정, 패키지발주→전성분표\n- Don't create circular dependencies\n- Be conservative: only add dependencies you're confident about`,
-          userMessage: `Analyze dependencies:\n\n${tl}`,
-        }),
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
-      let j = (data.content || [])
-        .filter((b: { type: string }) => b.type === 'text')
-        .map((b: { text: string }) => b.text)
-        .join('')
-        .trim()
-        .replace(/```json\s*/g, '')
-        .replace(/```\s*/g, '')
-        .trim();
-      const si = j.indexOf('{');
-      const ei = j.lastIndexOf('}');
-      if (si === -1) throw new Error('파싱 실패');
-      const parsed = JSON.parse(j.slice(si, ei + 1));
-      setResult(parsed.dependencies || []);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '알 수 없는 오류');
-    }
-    setAnalyzing(false);
-  };
-
-  const apply = () => {
-    const map: Record<string, string[]> = {};
-    (result || []).forEach((d) => { map[d.id] = d.dependsOn; });
-    onApply(map);
-  };
-
-  const byId: Record<string, AppTask> = {};
-  tasks.forEach((t) => { byId[t.id] = t; });
-
-  return (
-    <div style={S.backdrop} onClick={onClose}>
-      <div style={{ ...S.modal, maxWidth: 600 }} onClick={(e) => e.stopPropagation()}>
-        <div style={S.mHead}>
-          <div>
-            <div style={{ fontSize: 10, letterSpacing: '.2em', color: '#5F4B82', fontFamily: "'DM Serif Display',serif" }}>AI ANALYZE</div>
-            <h2 style={S.mTitle}>의존관계 자동 분석</h2>
-          </div>
-          <button onClick={onClose} style={S.mClose}>×</button>
-        </div>
-        <div style={S.mBody}>
-          <div style={S.hint}>AI가 전체 태스크를 분석해서 &quot;A가 끝나야 B를 시작할 수 있다&quot;는 의존관계를 자동으로 추론합니다.</div>
-          {!result && (
-            <button onClick={analyze} disabled={analyzing} style={{ ...S.syncBtnBig, background: '#5F4B82', opacity: analyzing ? 0.5 : 1 }}>
-              {analyzing ? '⏳ AI 분석 중… (5-10초)' : '🔗 의존관계 분석 시작'}
-            </button>
-          )}
-          {error && <div style={{ color: '#B84848', fontSize: 12 }}>⚠ {error}</div>}
-          {result && (
-            <div style={S.prevBox}>
-              <div style={{ fontSize: 11, color: '#5F4B82', fontWeight: 500, marginBottom: 8 }}>{result.length}개 의존관계 발견</div>
-              {result.map((d, i) => {
-                const task = byId[d.id];
-                if (!task) return null;
-                return (
-                  <div key={i} style={{ ...S.prevItem, borderLeftColor: '#A896C4', background: '#FDFBF7' }}>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 12, fontWeight: 400 }}>{task.title}</div>
-                      <div style={{ fontSize: 10, color: '#5F4B82', marginTop: 2 }}>← {d.dependsOn.map((did) => byId[did]?.title || did).join(', ')}</div>
-                      <div style={{ fontSize: 10, color: '#8A7D72', marginTop: 1, fontStyle: 'italic' }}>{d.reason}</div>
-                    </div>
-                  </div>
-                );
-              })}
-              <button onClick={apply} style={S.confirmBtn}>✓ 의존관계 적용하기</button>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
@@ -1055,7 +1634,7 @@ function Editor({
   onDelete?: () => void;
   allTasks: AppTask[];
 }) {
-  const projects = [...new Set(allTasks.map((t) => t.project).filter(Boolean))];
+  const projectsList = [...new Set(allTasks.map((t) => t.project).filter(Boolean))];
   const [f, setF] = useState({
     title: task?.title || '',
     category: task?.category || '기타',
@@ -1077,7 +1656,7 @@ function Editor({
       <div style={S.modal} onClick={(e) => e.stopPropagation()}>
         <div style={S.mHead}>
           <h2 style={S.mTitle}>{task ? '수정' : '새 할 일'}</h2>
-          <button onClick={onClose} style={S.mClose}>×</button>
+          <button onClick={onClose} style={S.mClose}>x</button>
         </div>
         <div style={S.mBody}>
           <label style={S.label}>제목</label>
@@ -1092,7 +1671,7 @@ function Editor({
             <div style={S.field}>
               <label style={S.label}>프로젝트</label>
               <input list="proj-list" value={f.project} onChange={(e) => s('project', e.target.value)} style={S.input} placeholder="예: 샘플링" />
-              <datalist id="proj-list">{projects.map((p) => <option key={p!} value={p!} />)}</datalist>
+              <datalist id="proj-list">{projectsList.map((p) => <option key={p!} value={p!} />)}</datalist>
             </div>
           </div>
           <div style={S.r2}>
@@ -1111,7 +1690,7 @@ function Editor({
             <div style={S.field}>
               <label style={S.label}>우선순위</label>
               <select value={f.priority} onChange={(e) => s('priority', e.target.value)} style={S.input}>
-                <option value="high">높음 🔴</option>
+                <option value="high">높음</option>
                 <option value="medium">중간</option>
                 <option value="low">낮음</option>
               </select>
@@ -1140,108 +1719,132 @@ function Editor({
 // ═══════════════════════════════════════════════════
 // STYLES
 // ═══════════════════════════════════════════════════
-const CSS = `@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Sans+KR:wght@300;400;500;600&display=swap');*{box-sizing:border-box;margin:0}button,select{cursor:pointer;font-family:inherit}input,select,textarea{font-family:inherit}@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}`;
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Sans+KR:wght@300;400;500;600&display=swap');
+*{box-sizing:border-box;margin:0}
+button,select{cursor:pointer;font-family:inherit}
+input,select,textarea{font-family:inherit}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes flashGreen{0%{background:#EBF3E6}50%{background:#A8C496}100%{background:#EBF3E6}}
+@media(max-width:767px){
+  .board-grid{grid-template-columns:1fr !important}
+}
+`;
 
 const S: Record<string, React.CSSProperties> = {
-  root: { minHeight: '100vh', background: '#F5F1EA', padding: '20px 14px 60px', fontFamily: "'IBM Plex Sans KR',sans-serif", fontWeight: 300, color: '#1A1613', maxWidth: 1100, margin: '0 auto' },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, paddingBottom: 14, borderBottom: '1px solid #DDD3C2', marginBottom: 10 },
-  hL: { flex: 1, minWidth: 160 },
-  hR: { display: 'flex', gap: 8, flexWrap: 'wrap' },
-  brand: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 },
-  dot: { width: 6, height: 6, borderRadius: '50%', background: '#5F4B82', display: 'inline-block' },
+  root: {
+    minHeight: '100vh', background: '#F5F1EA', fontFamily: "'IBM Plex Sans KR',sans-serif",
+    fontWeight: 300, color: '#1A1613', maxWidth: 800, margin: '0 auto',
+    display: 'flex', flexDirection: 'column', gap: 8,
+    paddingBottom: 80,
+  },
+  // Header
+  header: {
+    position: 'sticky', top: 0, zIndex: 100,
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
+    padding: '10px 14px',
+    background: '#F5F1EA', borderBottom: '1px solid #DDD3C2',
+  },
+  hL: { display: 'flex', alignItems: 'center', gap: 8 },
+  hR: { display: 'flex', gap: 6, flexWrap: 'wrap' },
+  brand: { display: 'flex', alignItems: 'center', gap: 6 },
+  dot: { width: 5, height: 5, borderRadius: '50%', background: '#5F4B82', display: 'inline-block' },
   bTxt: { fontFamily: "'DM Serif Display',serif", fontSize: 11, letterSpacing: '.3em', color: '#4A3F38' },
-  h1: { fontFamily: "'DM Serif Display',serif", fontWeight: 400, fontSize: 'clamp(20px,4vw,30px)', lineHeight: 1.1 },
-  ms: { background: '#FAF6EF', border: '1px solid', padding: '7px 12px', borderRadius: 2, textAlign: 'right' as const, minWidth: 86 },
-  msL: { fontFamily: "'DM Serif Display',serif", fontSize: 9, letterSpacing: '.12em', color: '#8A7D72', textTransform: 'uppercase' as const },
-  msD: { fontFamily: "'DM Serif Display',serif", fontSize: 18, fontWeight: 400, lineHeight: 1.2 },
-  msDt: { fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', fontSize: 10, color: '#8A7D72' },
-  okr: { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: 'linear-gradient(135deg,#FAF6EF,#F0E9DB)', border: '1px solid #DDD3C2', borderRadius: 2, marginBottom: 10 },
-  okrLabel: { fontFamily: "'DM Serif Display',serif", fontSize: 10, letterSpacing: '.2em', color: '#5F4B82', flexShrink: 0 },
-  okrText: { fontSize: 13, fontWeight: 400 },
-  stats: { display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 6, marginBottom: 10 },
-  st: { background: '#FAF6EF', padding: '8px 12px', borderRadius: 2, borderLeft: '3px solid', display: 'flex', alignItems: 'baseline', gap: 6 },
-  stN: { fontFamily: "'DM Serif Display',serif", fontSize: 'clamp(18px,3vw,24px)', lineHeight: 1 },
-  stL: { fontSize: 10, color: '#8A7D72' },
-  ctrl: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 14 },
-  tabs: { display: 'flex', background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 2, padding: 2, flexWrap: 'wrap' },
-  tab: { padding: '5px 10px', background: 'transparent', border: 'none', fontSize: 11, color: '#8A7D72', borderRadius: 2, whiteSpace: 'nowrap' },
-  tabOn: { background: '#1A1613', color: '#FAF6EF' },
+  ms: { background: '#FAF6EF', border: '1px solid', padding: '4px 10px', borderRadius: 2, textAlign: 'right' as const, minWidth: 76 },
+  msL: { fontFamily: "'DM Serif Display',serif", fontSize: 8, letterSpacing: '.1em', color: '#8A7D72', textTransform: 'uppercase' as const },
+  msD: { fontFamily: "'DM Serif Display',serif", fontSize: 15, fontWeight: 400, lineHeight: 1.2 },
+  msDt: { fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', fontSize: 9, color: '#8A7D72' },
+  // Command bar
+  cmdBar: {
+    position: 'sticky', top: 47, zIndex: 99,
+    display: 'flex', gap: 6, alignItems: 'flex-start',
+    padding: '8px 14px',
+    background: '#F5F1EA', borderBottom: '1px solid #E8DFCE',
+    flexDirection: 'column',
+  },
+  cmdInput: {
+    flex: 1, padding: '8px 12px', background: '#fff', border: '1px solid #DDD3C2', borderRadius: 2,
+    fontSize: 13, color: '#1A1613', outline: 'none', fontWeight: 300, fontFamily: "'IBM Plex Sans KR',sans-serif",
+    minWidth: 200,
+  },
+  cmdAddBtn: {
+    padding: '8px 14px', background: '#1A1613', color: '#FAF6EF',
+    border: 'none', borderRadius: 2, fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
+  },
+  // Filters
+  filterBar: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap',
+    padding: '0 14px',
+  },
   filters: { display: 'flex', gap: 4 },
   sel: { padding: '4px 6px', border: '1px solid #DDD3C2', borderRadius: 2, background: '#FAF6EF', fontSize: 10, color: '#4A3F38' },
-  syncBtn: { padding: '5px 12px', background: 'linear-gradient(135deg,#5F4B82,#8B7AAD)', color: '#FAF6EF', border: 'none', borderRadius: 2, fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap' },
-  aiBtn: { padding: '5px 12px', background: '#FAF6EF', border: '1px solid #A896C4', borderRadius: 2, color: '#5F4B82', fontSize: 11, fontWeight: 500, whiteSpace: 'nowrap' },
-  addBtn: { padding: '5px 10px', background: '#1A1613', color: '#FAF6EF', border: 'none', borderRadius: 2, fontSize: 13, fontWeight: 500, lineHeight: 1 },
-  critBox: { background: 'linear-gradient(135deg,#FEF5F3,#FBEDEA)', border: '1px solid #D4A4A4', borderRadius: 2, padding: '16px 18px', animation: 'fadeUp .4s ease-out' },
-  critHead: { marginBottom: 10 },
-  critLabel: { fontFamily: "'DM Serif Display',serif", fontSize: 10, letterSpacing: '.2em', color: '#B84848', marginBottom: 3 },
-  critTitle: { fontFamily: "'DM Serif Display',serif", fontSize: 16, fontWeight: 400 },
-  critItem: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 12px', background: '#fff', borderRadius: 2, cursor: 'pointer', flexWrap: 'wrap' },
-  critItemLeft: { display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 140 },
-  critItemTitle: { fontSize: 12, fontWeight: 400 },
-  critItemRight: { display: 'flex', alignItems: 'center', gap: 6 },
-  critChain: { fontSize: 10, color: '#B84848', fontWeight: 500, background: '#FBEDEA', padding: '2px 6px', borderRadius: 100 },
-  critDate: { fontSize: 10, fontStyle: 'italic' },
-  secBox: { border: '1px solid', borderRadius: 2, overflow: 'hidden' },
-  secHead: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px' },
-  secTitle: { fontFamily: "'DM Serif Display',serif", fontSize: 14 },
-  secSub: { fontSize: 11, color: '#8A7D72', fontStyle: 'italic' },
-  secCount: { marginLeft: 'auto', fontFamily: "'DM Serif Display',serif", fontSize: 20, fontWeight: 400 },
-  secBody: { padding: 8, display: 'flex', flexDirection: 'column', gap: 5 },
-  card: { padding: '8px 10px', background: '#FAF6EF', borderLeft: '3px solid #DDD3C2', borderRadius: 2, cursor: 'pointer', transition: 'all .15s', animation: 'fadeUp .3s ease-out', userSelect: 'none' },
-  cTop: { display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4, flexWrap: 'wrap' },
+  toolBtn: {
+    padding: '4px 10px', background: '#FAF6EF', border: '1px solid #A896C4', borderRadius: 2,
+    color: '#5F4B82', fontSize: 10, fontWeight: 500, whiteSpace: 'nowrap',
+  },
+  // Stats
+  stats: { display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 4, padding: '0 14px' },
+  st: { background: '#FAF6EF', padding: '6px 10px', borderRadius: 2, borderLeft: '3px solid', display: 'flex', alignItems: 'baseline', gap: 4 },
+  stN: { fontFamily: "'DM Serif Display',serif", fontSize: 'clamp(16px,3vw,22px)', lineHeight: 1 },
+  stL: { fontSize: 9, color: '#8A7D72' },
+  // Collapsible sections
+  section: { border: '1px solid #E8DFCE', borderRadius: 2, overflow: 'hidden', margin: '0 14px' },
+  sectionHead: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%',
+    padding: '8px 14px', background: '#FAF6EF', border: 'none', borderBottom: '1px solid #E8DFCE',
+    cursor: 'pointer', fontFamily: "'IBM Plex Sans KR',sans-serif",
+  },
+  sectionTitle: { fontFamily: "'DM Serif Display',serif", fontSize: 13, color: '#1A1613' },
+  sectionToggle: { fontSize: 10, color: '#8A7D72' },
+  sectionBody: { padding: 8 },
+  // Cards
+  card: {
+    padding: '8px 10px', background: '#FAF6EF', borderLeft: '3px solid #DDD3C2', borderRadius: 2,
+    cursor: 'pointer', transition: 'all .15s', animation: 'fadeUp .3s ease-out', userSelect: 'none',
+  },
+  cTop: { display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3, flexWrap: 'wrap' },
   catB: { fontSize: 9, padding: '1px 6px', borderRadius: 100, fontWeight: 500, letterSpacing: '.03em', whiteSpace: 'nowrap' },
-  projB: { fontSize: 9, padding: '1px 6px', borderRadius: 100, background: '#F5F1EA', color: '#4A3F38', border: '1px solid #E8DFCE' },
   ownB: { fontSize: 9, padding: '1px 6px', borderRadius: 100, fontWeight: 500, whiteSpace: 'nowrap' },
-  chainB: { fontSize: 9, padding: '1px 6px', borderRadius: 100, background: '#FBEDEA', color: '#B84848', fontWeight: 500 },
   cTitle: { fontSize: 12, fontWeight: 400, lineHeight: 1.4, marginBottom: 2 },
-  cNote: { fontSize: 10, color: '#8A7D72', fontStyle: 'italic', lineHeight: 1.4, marginBottom: 3, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' },
   cBot: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4 },
   cDate: { fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', fontSize: 10 },
-  stSel: { padding: '2px 5px', border: '1px solid #E8DFCE', borderRadius: 2, fontSize: 10, fontWeight: 500 },
-  stBadge: { fontSize: 9, padding: '1px 6px', borderRadius: 100, fontWeight: 500 },
-  empty: { textAlign: 'center' as const, padding: '16px 0', color: '#CCBFA8', fontStyle: 'italic', fontSize: 12 },
-  emptyBig: { textAlign: 'center' as const, padding: '40px 0', color: '#CCBFA8', fontStyle: 'italic', fontSize: 14 },
-  board: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 8, marginBottom: 20 },
-  col: { border: '1px solid', borderRadius: 2, minHeight: 160, display: 'flex', flexDirection: 'column', transition: 'all .2s' },
-  colH: { padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid' },
-  colB: { padding: 6, display: 'flex', flexDirection: 'column', gap: 5, flex: 1, minHeight: 60 },
-  catProgress: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: 6, padding: '12px 14px', background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 2, marginBottom: 8 },
-  catProgressItem: {},
-  cpPct: { fontFamily: "'DM Serif Display',serif", fontSize: 13, color: '#1A1613' },
-  cpCount: { fontSize: 10, color: '#8A7D72', fontStyle: 'italic' },
-  cpBar: { width: '100%', height: 4, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden', marginTop: 3 },
-  cpBarIn: { height: '100%', borderRadius: 100, transition: 'width .5s ease' },
-  treeBox: { border: '1px solid', borderRadius: 2, overflow: 'hidden', marginBottom: 4 },
-  treeCatHead: { padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  treeCatName: { fontFamily: "'DM Serif Display',serif", fontSize: 14, fontWeight: 400 },
-  treeCatCount: { fontFamily: "'DM Serif Display',serif", fontSize: 16 },
-  treeProjBox: { borderTop: '1px solid #EFE7D6' },
-  treeProjHead: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: '#FDFBF7' },
-  treeProjName: { fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', fontSize: 13, color: '#4A3F38', minWidth: 80 },
-  treeProjBar: { flex: 1, height: 4, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' },
-  treeProjCount: { fontSize: 11, color: '#8A7D72', fontStyle: 'italic', minWidth: 30, textAlign: 'right' as const },
-  treeProjBody: { padding: '4px 8px 8px' },
-  treeItem: { display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderLeft: '2px solid #DDD3C2', borderRadius: 2, cursor: 'pointer', marginBottom: 2, transition: 'all .1s', flexWrap: 'wrap' },
+  stBadge: { fontSize: 9, padding: '2px 7px', borderRadius: 100, fontWeight: 500 },
+  // Board
+  board: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 6 },
+  col: { border: '1px solid', borderRadius: 2, minHeight: 120, display: 'flex', flexDirection: 'column', transition: 'all .2s' },
+  colH: { padding: '6px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid' },
+  colB: { padding: 5, display: 'flex', flexDirection: 'column', gap: 4, flex: 1, minHeight: 40 },
+  empty: { textAlign: 'center' as const, padding: '12px 0', color: '#CCBFA8', fontStyle: 'italic', fontSize: 11 },
+  // Batch bar
+  batchBar: {
+    position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 200,
+    display: 'flex', alignItems: 'center', gap: 6, padding: '10px 14px',
+    background: '#1A1613', color: '#FAF6EF',
+    justifyContent: 'center', flexWrap: 'wrap',
+  },
+  batchLabel: { fontSize: 12, fontWeight: 500, marginRight: 4 },
+  batchBtn: { padding: '5px 10px', background: '#FAF6EF', color: '#1A1613', border: 'none', borderRadius: 2, fontSize: 11, fontWeight: 500 },
+  batchSel: { padding: '5px 8px', background: '#FAF6EF', color: '#1A1613', border: 'none', borderRadius: 2, fontSize: 11 },
+  // Date picker
+  dpQuick: { padding: '3px 8px', background: '#EFEBFA', color: '#5F4B82', border: '1px solid #A896C4', borderRadius: 2, fontSize: 10, fontWeight: 500 },
+  dpNav: { background: 'transparent', border: '1px solid #DDD3C2', borderRadius: 2, padding: '2px 8px', color: '#4A3F38', fontSize: 13 },
+  // Modal
   backdrop: { position: 'fixed', inset: 0, background: 'rgba(26,22,19,.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 14 },
   modal: { background: '#FAF6EF', borderRadius: 2, width: '100%', maxWidth: 460, maxHeight: '90vh', overflow: 'auto', border: '1px solid #DDD3C2', boxShadow: '0 20px 60px rgba(26,22,19,.2)' },
-  mHead: { padding: '14px 18px 10px', borderBottom: '1px solid #EFE7D6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  mTitle: { fontFamily: "'DM Serif Display',serif", fontWeight: 400, fontSize: 18, margin: 0 },
-  mClose: { background: 'transparent', border: 'none', fontSize: 22, color: '#8A7D72', padding: 0 },
-  mBody: { padding: '12px 18px', display: 'flex', flexDirection: 'column', gap: 10 },
+  mHead: { padding: '12px 16px 8px', borderBottom: '1px solid #EFE7D6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  mTitle: { fontFamily: "'DM Serif Display',serif", fontWeight: 400, fontSize: 17, margin: 0 },
+  mClose: { background: 'transparent', border: 'none', fontSize: 20, color: '#8A7D72', padding: 0 },
+  mBody: { padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 8 },
   label: { fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', fontSize: 11, color: '#8A7D72' },
   input: { padding: '7px 10px', background: '#fff', border: '1px solid #DDD3C2', borderRadius: 2, fontSize: 13, color: '#1A1613', outline: 'none', fontWeight: 300, width: '100%' },
   r2: { display: 'flex', gap: 8 },
   field: { flex: 1, display: 'flex', flexDirection: 'column', gap: 3 },
-  mFoot: { padding: '10px 18px 14px', borderTop: '1px solid #EFE7D6', display: 'flex', gap: 8, alignItems: 'center' },
+  mFoot: { padding: '8px 16px 12px', borderTop: '1px solid #EFE7D6', display: 'flex', gap: 8, alignItems: 'center' },
   delBtn: { padding: '6px 12px', background: 'transparent', border: '1px solid #D4A4A4', color: '#B84848', borderRadius: 2, fontSize: 11 },
   canBtn: { padding: '6px 14px', background: 'transparent', border: '1px solid #DDD3C2', color: '#8A7D72', borderRadius: 2, fontSize: 11 },
   savBtn: { padding: '6px 18px', background: '#1A1613', border: 'none', color: '#FAF6EF', borderRadius: 2, fontSize: 12, fontWeight: 500 },
-  hint: { fontSize: 12, color: '#8A7D72', lineHeight: 1.5, padding: '6px 10px', background: '#EFEBFA', borderRadius: 2, borderLeft: '3px solid #A896C4' },
-  syncBtnBig: { padding: '10px 20px', background: '#1A1613', color: '#FAF6EF', border: 'none', borderRadius: 2, fontSize: 13, fontWeight: 500, width: '100%', marginTop: 4 },
-  prevBox: { marginTop: 8, border: '1px solid #E8DFCE', borderRadius: 2, padding: 10, maxHeight: 300, overflowY: 'auto' },
-  prevItem: { display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px', borderLeft: '3px solid', borderRadius: 2, cursor: 'pointer', marginBottom: 4 },
-  pChk: { width: 16, height: 16, borderRadius: 2, border: '1.5px solid', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, flexShrink: 0, marginTop: 1 },
   confirmBtn: { padding: '10px 20px', background: '#5F4B82', color: '#FAF6EF', border: 'none', borderRadius: 2, fontSize: 13, fontWeight: 500, width: '100%', marginTop: 8 },
-  footer: { paddingTop: 14, borderTop: '1px solid #DDD3C2', display: 'flex', alignItems: 'center', gap: 8, fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', fontSize: 11, color: '#8A7D72' },
+  pChk: { width: 16, height: 16, borderRadius: 2, border: '1.5px solid', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, flexShrink: 0, marginTop: 1 },
+  footer: { padding: '12px 14px', borderTop: '1px solid #DDD3C2', display: 'flex', alignItems: 'center', gap: 8, fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', fontSize: 11, color: '#8A7D72', marginTop: 'auto' },
   fLink: { background: 'transparent', border: 'none', fontSize: 10, color: '#B84848', textDecoration: 'underline', padding: 0, fontFamily: 'inherit', fontStyle: 'italic' },
 };
