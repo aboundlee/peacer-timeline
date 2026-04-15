@@ -2411,7 +2411,7 @@ select.status-pill{-webkit-appearance:none;appearance:none;padding-right:16px;ba
 const S: Record<string, React.CSSProperties> = {
   root: {
     minHeight: '100vh', background: '#FAFAF8', fontFamily: "'Pretendard','Noto Sans KR',sans-serif",
-    fontWeight: 400, color: '#1A1613', maxWidth: 800, margin: '0 auto',
+    fontWeight: 400, color: '#1A1613', maxWidth: 1100, margin: '0 auto',
     display: 'flex', flexDirection: 'column', gap: 8,
     paddingBottom: 60, fontSize: 13, lineHeight: 1.5,
     fontVariantNumeric: 'tabular-nums',
