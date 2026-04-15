@@ -1132,7 +1132,6 @@ function DashboardView({
                   )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                  <span style={{ fontSize: 12, color: '#AAA49C' }}>{track.total - track.done}개 남음</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     {track.phases.map((p, i) => (
                       <React.Fragment key={p.name}>
@@ -1189,7 +1188,6 @@ function DashboardView({
                             {dU(phase.target) < 0 ? `D+${Math.abs(dU(phase.target))}` : dU(phase.target) === 0 ? 'D-DAY' : `D-${dU(phase.target)}`}
                           </span>
                         )}
-                        <span style={{ fontSize: 12, color: '#B5AFA6' }}>{phase.total - phase.done}개 남음</span>
                         <span style={{
                           fontSize: 14, color: '#C5BFB6', fontWeight: 300,
                           transform: phaseOpen ? 'rotate(90deg)' : 'rotate(0deg)',
