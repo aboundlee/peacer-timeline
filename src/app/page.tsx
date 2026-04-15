@@ -459,7 +459,7 @@ export default function App() {
     return (
       <div style={{ ...S.root, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh' }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontFamily: "'Pretendard',sans-serif", fontSize: 24, marginBottom: 8 }}>PEACER</div>
+          <div style={{ fontSize: 24, marginBottom: 8 }}>PEACER</div>
           <div style={{ fontSize: 13, color: '#8A7D72' }}>...</div>
         </div>
       </div>
@@ -921,7 +921,7 @@ function DashboardView({
         {t.deadline && (
           <span
             onClick={(e) => { e.stopPropagation(); onDateClick(t.id, e); }}
-            style={{ fontSize: 10, color: isOverdue ? '#B84848' : '#AAA49C', fontFamily: "'Pretendard',sans-serif", fontStyle: 'italic', cursor: 'pointer', whiteSpace: 'nowrap' }}
+            style={{ fontSize: 10, color: isOverdue ? '#B84848' : '#AAA49C', fontStyle: 'italic', cursor: 'pointer', whiteSpace: 'nowrap' }}
           >{fD(t.deadline)}</span>
         )}
         <span
@@ -935,6 +935,7 @@ function DashboardView({
         >{t.owner}</span>
         {!isDone && (
           <select
+            className="status-pill"
             value={t.status}
             onClick={(e) => e.stopPropagation()}
             onChange={(e) => onChangeStatus(t.id, e.target.value)}
@@ -956,33 +957,23 @@ function DashboardView({
   return (
     <div style={{ margin: '0 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-      {/* ═══ Q2 목표 — compact, always visible ═══ */}
-      <div style={{ background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 6, padding: '12px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      {/* ═══ Q2 목표 ═══ */}
+      <div style={{ background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 8, padding: '16px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 500, color: '#1A1613', lineHeight: 1.4 }}>{OKR.objective}</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#1A1613', lineHeight: 1.4 }}>{OKR.objective}</div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            <div style={{ width: 60, height: 6, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
-              <div style={{
-                width: `${overallPct}%`, height: '100%', borderRadius: 100, transition: 'width .5s ease',
-                background: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#B84848' : '#5F4B82',
-              }} />
-            </div>
-            <span style={{ fontFamily: "'Pretendard',sans-serif", fontSize: 17, color: '#5F4B82', minWidth: 40, textAlign: 'right' as const }}>{overallPct}%</span>
-            {daysLeft != null && (
-              <span style={{
-                fontFamily: "'Pretendard',sans-serif", fontSize: 15,
-                color: daysLeft <= 7 ? '#B84848' : '#AAA49C',
-              }}>
-                {daysLeft <= 0 ? `D+${Math.abs(daysLeft)}` : `D-${daysLeft}`}
-              </span>
-            )}
-          </div>
+          <span style={{ fontSize: 20, color: '#5F4B82', fontWeight: 600 }}>{overallPct}%</span>
+        </div>
+        <div style={{ width: '100%', height: 4, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden', marginTop: 12 }}>
+          <div style={{
+            width: `${overallPct}%`, height: '100%', borderRadius: 100, transition: 'width .5s ease',
+            background: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#B84848' : '#5F4B82',
+          }} />
         </div>
         {data.projectedDate && (
-          <div style={{ fontSize: 11, color: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#B84848' : '#5C8A4E', marginTop: 4, fontWeight: 500 }}>
-            이 속도면 {data.projectedDate} 완료{data.projectedDaysOver != null && data.projectedDaysOver > 0 ? ` (${data.projectedDaysOver}일 초과)` : data.projectedDaysOver != null ? ' (목표 내)' : ''}
+          <div style={{ fontSize: 12, color: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#B84848' : '#5C8A4E', marginTop: 8 }}>
+            이 속도면 {data.projectedDate} 완료{data.projectedDaysOver != null && data.projectedDaysOver > 0 ? ` · ${data.projectedDaysOver}일 초과` : ''}
           </div>
         )}
       </div>
@@ -995,8 +986,8 @@ function DashboardView({
           borderRadius: 6, padding: '16px 18px',
           borderLeft: `4px solid ${data.blocker.deadline && data.blocker.deadline < todayDate ? '#B84848' : '#5F4B82'}`,
         }}>
-          <div style={{ fontSize: 11, fontWeight: 500, color: data.blocker.deadline && data.blocker.deadline < todayDate ? '#B84848' : '#5F4B82', marginBottom: 8, letterSpacing: '.04em' }}>
-            {data.blocker.deadline && data.blocker.deadline < todayDate ? '지연 중 — 지금 제일 중요한 것' : '지금 제일 중요한 것'}
+          <div style={{ fontSize: 10, fontWeight: 600, color: data.blocker.deadline && data.blocker.deadline < todayDate ? '#B84848' : '#5F4B82', marginBottom: 8, letterSpacing: '.06em', textTransform: 'uppercase' as const }}>
+            #1 BLOCKER
           </div>
           <div
             onClick={() => onEdit(data.blocker!.id)}
@@ -1027,7 +1018,7 @@ function DashboardView({
               <span
                 onClick={(e) => onDateClick(data.blocker!.id, e)}
                 style={{
-                  fontSize: 11, fontFamily: "'Pretendard',sans-serif", fontStyle: 'italic', cursor: 'pointer',
+                  fontSize: 11, fontStyle: 'italic', cursor: 'pointer',
                   color: data.blocker.deadline < todayDate ? '#B84848' : '#AAA49C',
                   padding: '3px 10px', borderRadius: 100,
                   border: `1px solid ${data.blocker.deadline < todayDate ? '#D4A4A4' : '#E8DFCE'}`,
@@ -1041,10 +1032,11 @@ function DashboardView({
             )}
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
               <select
+                className="status-pill"
                 value={data.blocker.status}
                 onClick={(e) => e.stopPropagation()}
                 onChange={(e) => onChangeStatus(data.blocker!.id, e.target.value)}
-                style={{ fontSize: 11, padding: '3px 8px', borderRadius: 100, fontWeight: 400, background: SC[data.blocker.status]?.bg, color: SC[data.blocker.status]?.tx, border: `1px solid ${SC[data.blocker.status]?.bd}`, cursor: 'pointer', appearance: 'none', WebkitAppearance: 'none', outline: 'none', textAlign: 'center', minWidth: 52 }}
+                style={{ fontSize: 11, padding: '3px 8px', borderRadius: 100, fontWeight: 400, background: SC[data.blocker.status]?.bg, color: SC[data.blocker.status]?.tx, border: `1px solid ${SC[data.blocker.status]?.bd}`, cursor: 'pointer', outline: 'none', minWidth: 52 }}
               >
                 {STS.map(st => <option key={st} value={st} style={{ background: SC[st]?.bg, color: SC[st]?.tx }}>{SL[st]}</option>)}
               </select>
@@ -1057,8 +1049,8 @@ function DashboardView({
         </div>
       )}
 
-      {/* ═══ 오늘 할 것 — per person ═══ */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+      {/* ═══ 오늘 할 것 ═══ */}
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {OWNERS.filter(o => o !== '공동').map(owner => {
           const myTasks = data.personTasks[owner] || [];
           const oc = ownerColors[owner] || ownerColors['공동'];
@@ -1066,14 +1058,17 @@ function DashboardView({
           return (
             <div key={owner} style={{
               flex: '1 1 280px', minWidth: 0,
-              background: '#FAF6EF', border: '1px solid #E8DFCE', borderRadius: 6,
-              borderTop: `3px solid ${oc.accent}`, overflow: 'hidden',
+              background: '#FAF6EF', border: '1px solid #E8DFCE', borderRadius: 8,
+              overflow: 'hidden',
             }}>
-              <div style={{ padding: '12px 14px 8px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 500, color: oc.accent }}>{owner}</span>
-                <span style={{ fontSize: 11, color: '#B5AFA6' }}>오늘 {myTasks.length}개</span>
+              <div style={{ padding: '12px 16px 8px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  width: 8, height: 8, borderRadius: '50%', background: oc.accent, flexShrink: 0,
+                }} />
+                <span style={{ fontSize: 14, fontWeight: 500, color: '#1A1613' }}>{owner}</span>
+                <span style={{ fontSize: 12, color: '#B5AFA6' }}>{myTasks.length}</span>
               </div>
-              <div style={{ padding: '0 10px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ padding: '0 8px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {myTasks.map(t => {
                   const isOverdue = t.deadline != null && t.deadline < todayDate;
                   return (
@@ -1082,33 +1077,21 @@ function DashboardView({
                       onClick={() => onEdit(t.id)}
                       className="dash-row"
                       style={{
-                        padding: '8px 10px', cursor: 'pointer', borderRadius: 4,
-                        borderLeft: `2px solid ${isOverdue ? '#B84848' : (t.blocksCount || 0) > 0 ? '#5F4B82' : '#E8DFCE'}`,
+                        padding: '8px 12px', cursor: 'pointer', borderRadius: 8,
                         display: 'flex', alignItems: 'center', gap: 8,
-                        minHeight: 36,
+                        minHeight: 40,
                       }}
                     >
-                      <span style={{ fontSize: 13, flex: 1, lineHeight: 1.5, color: '#1A1613' }}>{t.title}</span>
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onMarkDone(t.id); }}
+                        style={{ width: 18, height: 18, borderRadius: '50%', border: '2px solid #D5CCC0', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                      />
+                      <span style={{ fontSize: 14, flex: 1, lineHeight: 1.5, color: '#1A1613' }}>{t.title}</span>
                       {t.deadline && (
-                        <span
-                          onClick={(e) => { e.stopPropagation(); onDateClick(t.id, e); }}
-                          style={{ fontSize: 10, color: isOverdue ? '#B84848' : '#B5AFA6', fontFamily: "'Pretendard',sans-serif", fontStyle: 'italic', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                        >
+                        <span style={{ fontSize: 12, color: isOverdue ? '#B84848' : '#B5AFA6', whiteSpace: 'nowrap' }}>
                           {fD(t.deadline)}
                         </span>
                       )}
-                      <select
-                        value={t.status}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => onChangeStatus(t.id, e.target.value)}
-                        style={{ fontSize: 10, padding: '2px 6px', borderRadius: 100, fontWeight: 400, background: SC[t.status]?.bg, color: SC[t.status]?.tx, border: `1px solid ${SC[t.status]?.bd}`, cursor: 'pointer', appearance: 'none', WebkitAppearance: 'none', outline: 'none', textAlign: 'center', minWidth: 48 }}
-                      >
-                        {STS.map(st => <option key={st} value={st} style={{ background: SC[st]?.bg, color: SC[st]?.tx }}>{SL[st]}</option>)}
-                      </select>
-                      <span
-                        onClick={(e) => { e.stopPropagation(); onMarkDone(t.id); }}
-                        style={{ width: 24, height: 24, borderRadius: 4, border: '2px solid #5C8A4E', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, color: '#5C8A4E', flexShrink: 0 }}
-                      >✓</span>
                     </div>
                   );
                 })}
@@ -1133,39 +1116,27 @@ function DashboardView({
               onClick={() => toggleTrack(track.name)}
               className="dash-row"
               style={{
-                padding: '14px 16px', cursor: 'pointer',
+                padding: '16px 20px', cursor: 'pointer',
                 display: 'flex', alignItems: 'center', gap: 12,
-                minHeight: 48,
+                minHeight: 56,
               }}
             >
-              <span style={{ fontSize: 20, lineHeight: 1 }}>{track.emoji}</span>
+              <span style={{ fontSize: 22, lineHeight: 1 }}>{track.emoji}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <span style={{ fontSize: 15, fontWeight: 500, color: '#1A1613' }}>
-                    {track.name}
-                  </span>
-                  <span style={{ fontSize: 11, color: '#AAA49C' }}>{track.goal}</span>
-                </div>
-                {/* Burndown line: D-day · remaining · velocity */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 15, fontWeight: 600, color: '#1A1613' }}>{track.name}</span>
                   {track.target && (
-                    <span style={{ fontSize: 11, color: dU(track.target) < 0 ? '#B84848' : '#8A7D72', fontWeight: 500 }}>
+                    <span style={{ fontSize: 12, color: dU(track.target) < 0 ? '#B84848' : '#AAA49C', fontWeight: 500 }}>
                       {dU(track.target) < 0 ? `D+${Math.abs(dU(track.target))}` : dU(track.target) === 0 ? 'D-DAY' : `D-${dU(track.target)}`}
                     </span>
                   )}
-                  <span style={{ fontSize: 11, color: '#AAA49C' }}>
-                    남은 TODO {track.total - track.done}개
-                  </span>
-                  {track.weeklyDone > 0 && (
-                    <span style={{ fontSize: 11, color: '#5C8A4E' }}>
-                      이번 주 {track.weeklyDone}개 완료
-                    </span>
-                  )}
-                  {/* Phase signal dots */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 4 }}>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                  <span style={{ fontSize: 12, color: '#AAA49C' }}>{track.done}/{track.total}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     {track.phases.map((p, i) => (
                       <React.Fragment key={p.name}>
-                        <span title={`${p.name} ${p.done}/${p.total}`} style={{
+                        <span title={p.name} style={{
                           width: 8, height: 8, borderRadius: '50%',
                           background: signalColor(p.status),
                           transition: 'background .3s',
@@ -1178,10 +1149,7 @@ function DashboardView({
                   </div>
                 </div>
               </div>
-              <div style={{ width: 56, height: 6, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${pct}%`, background: track.hasOverdue ? '#B84848' : accent.dot, borderRadius: 100, transition: 'width .5s ease' }} />
-              </div>
-              <span style={{ fontFamily: "'Pretendard',sans-serif", fontSize: 15, color: accent.dot, minWidth: 34, textAlign: 'right' as const }}>{pct}%</span>
+              <span style={{ fontSize: 17, color: accent.dot, fontWeight: 600 }}>{pct}%</span>
               <span style={{
                 fontSize: 14, color: '#C5BFB6', fontWeight: 300,
                 transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
@@ -1197,46 +1165,33 @@ function DashboardView({
                   const phasePct = phase.total > 0 ? Math.round((phase.done / phase.total) * 100) : 0;
                   return (
                     <div key={phase.name} style={{ marginBottom: 4 }}>
-                      {/* Phase row — the signal light */}
+                      {/* Phase row */}
                       <div
                         onClick={() => togglePhase(`${track.name}/${phase.name}`)}
                         className="dash-row"
                         style={{
-                          display: 'flex', alignItems: 'center', gap: 10,
-                          padding: '10px 12px', cursor: 'pointer', borderRadius: 4,
-                          minHeight: 42,
+                          display: 'flex', alignItems: 'center', gap: 12,
+                          padding: '12px 16px', cursor: 'pointer', borderRadius: 8,
+                          minHeight: 44,
                         }}
                       >
-                        {/* Signal light */}
                         <span style={{
-                          width: 12, height: 12, borderRadius: '50%', flexShrink: 0,
+                          width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
                           background: signalColor(phase.status),
                           boxShadow: phase.status === 'overdue' ? '0 0 6px rgba(184,72,72,.4)' : 'none',
                         }} />
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{ fontSize: 14, fontWeight: 400, color: '#1A1613' }}>{phase.name}</span>
-                          <span style={{ fontSize: 11, color: '#B5AFA6', marginLeft: 8, fontFamily: "'Pretendard',sans-serif" }}>{phase.done}/{phase.total}</span>
-                          {phase.target && (
-                            <span style={{
-                              fontSize: 10, marginLeft: 8, fontWeight: 500,
-                              color: phase.status === 'done' ? '#5F4B82' : dU(phase.target) < 0 ? '#B84848' : '#AAA49C',
-                            }}>
-                              {phase.status === 'done' ? '완료' : dU(phase.target) < 0 ? `D+${Math.abs(dU(phase.target))}` : dU(phase.target) === 0 ? 'D-DAY' : `D-${dU(phase.target)}`}
-                            </span>
-                          )}
-                        </div>
-                        {/* Status label */}
+                        <span style={{ fontSize: 14, fontWeight: 400, color: '#1A1613', flex: 1 }}>{phase.name}</span>
+                        {phase.target && phase.status !== 'done' && (
+                          <span style={{
+                            fontSize: 12, fontWeight: 500,
+                            color: dU(phase.target) < 0 ? '#B84848' : '#AAA49C',
+                          }}>
+                            {dU(phase.target) < 0 ? `D+${Math.abs(dU(phase.target))}` : dU(phase.target) === 0 ? 'D-DAY' : `D-${dU(phase.target)}`}
+                          </span>
+                        )}
+                        <span style={{ fontSize: 12, color: '#B5AFA6' }}>{phase.done}/{phase.total}</span>
                         <span style={{
-                          fontSize: 11, color: signalColor(phase.status), fontWeight: 500,
-                        }}>
-                          {phase.statusLabel}
-                        </span>
-                        {/* Mini progress */}
-                        <div style={{ width: 40, height: 4, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
-                          <div style={{ height: '100%', width: `${phasePct}%`, background: signalColor(phase.status), borderRadius: 100, transition: 'width .3s' }} />
-                        </div>
-                        <span style={{
-                          fontSize: 12, color: '#C5BFB6', fontWeight: 300,
+                          fontSize: 14, color: '#C5BFB6', fontWeight: 300,
                           transform: phaseOpen ? 'rotate(90deg)' : 'rotate(0deg)',
                           transition: 'transform .2s ease',
                         }}>&#x203A;</span>
@@ -1267,7 +1222,7 @@ function DashboardView({
           >
             <span style={{ fontSize: 20, lineHeight: 1 }}>📌</span>
             <span style={{ fontSize: 15, fontWeight: 500, color: '#1A1613', flex: 1 }}>기타</span>
-            <span style={{ fontSize: 11, color: '#B5AFA6', fontFamily: "'Pretendard',sans-serif" }}>{data.uncatDone}/{data.uncatTasks.length}</span>
+            <span style={{ fontSize: 12, color: '#B5AFA6' }}>{data.uncatDone}/{data.uncatTasks.length}</span>
             <span style={{ fontSize: 14, color: '#C5BFB6', fontWeight: 300, transform: openTracks.has('기타') ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .2s ease' }}>&#x203A;</span>
           </div>
           {openTracks.has('기타') && (
@@ -1356,7 +1311,7 @@ function WeeklyGrid({
             }}
           >
             <div style={{ fontSize: 10 }}>{d.label}</div>
-            <div style={{ fontFamily: "'Pretendard',sans-serif", fontSize: 15 }}>{d.date.getDate()}</div>
+            <div style={{ fontSize: 15 }}>{d.date.getDate()}</div>
           </div>
         ))}
 
@@ -1455,7 +1410,7 @@ function ProjectCards({
               }}
             >
               <span style={{ fontSize: 14 }}>{emoji}</span>
-              <span style={{ fontFamily: "'Pretendard',sans-serif", fontSize: 13, flex: 1 }}>
+              <span style={{ fontSize: 13, flex: 1 }}>
                 {proj.name}
                 {PROJECT_META[proj.name]?.goal && (
                   <div style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic', marginTop: 1 }}>
@@ -1652,7 +1607,7 @@ function DatePicker({
         {/* Month nav */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
           <button onClick={() => setMonth((p) => p.month === 0 ? { year: p.year - 1, month: 11 } : { ...p, month: p.month - 1 })} style={S.dpNav}>&lt;</button>
-          <span style={{ fontFamily: "'Pretendard',sans-serif", fontSize: 13 }}>
+          <span style={{ fontSize: 13 }}>
             {month.year}.{month.month + 1}
           </span>
           <button onClick={() => setMonth((p) => p.month === 11 ? { year: p.year + 1, month: 0 } : { ...p, month: p.month + 1 })} style={S.dpNav}>&gt;</button>
@@ -1741,8 +1696,8 @@ function BoardView({
         return (
           <div key={st} onDragOver={onDO(st)} onDrop={onDD(st)} style={{ ...S.col, background: isO ? sc.bg : '#fff', borderColor: isO ? sc.bd : '#E8DFCE' }}>
             <div style={{ ...S.colH, background: sc.bg, borderBottomColor: sc.bd + '55' }}>
-              <span style={{ color: sc.tx, fontFamily: "'Pretendard',sans-serif", fontSize: 13 }}>{SL[st]}</span>
-              <span style={{ color: sc.tx, fontFamily: "'Pretendard',sans-serif", fontSize: 18 }}>{items.length}</span>
+              <span style={{ color: sc.tx, fontSize: 13 }}>{SL[st]}</span>
+              <span style={{ color: sc.tx, fontSize: 18 }}>{items.length}</span>
             </div>
             <div style={S.colB}>
               {items.map((t) => {
@@ -1805,10 +1760,11 @@ function BoardView({
                       )}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
                         <select
+                          className="status-pill"
                           value={t.status}
                           onClick={(e) => e.stopPropagation()}
                           onChange={(e) => onChangeStatus(t.id, e.target.value)}
-                          style={{ ...S.stBadge, background: SC[t.status]?.bg, color: SC[t.status]?.tx, border: `1px solid ${SC[t.status]?.bd}`, cursor: 'pointer', appearance: 'none', WebkitAppearance: 'none', outline: 'none', textAlign: 'center', minWidth: 48 }}
+                          style={{ ...S.stBadge, background: SC[t.status]?.bg, color: SC[t.status]?.tx, border: `1px solid ${SC[t.status]?.bd}`, cursor: 'pointer', outline: 'none', minWidth: 48 }}
                         >
                           {STS.map(st => <option key={st} value={st} style={{ background: SC[st]?.bg, color: SC[st]?.tx }}>{SL[st]}</option>)}
                         </select>
@@ -1936,6 +1892,7 @@ const CSS = `
 *{box-sizing:border-box;margin:0}
 button,select{cursor:pointer;font-family:inherit}
 input,select,textarea{font-family:inherit}
+select.status-pill{-webkit-appearance:none;appearance:none;padding-right:16px;background-repeat:no-repeat;background-position:right 5px center;background-size:8px;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 10 6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238A7D72' stroke-width='1.5' fill='none'/%3E%3C/svg%3E")}
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px) translateX(0)}to{opacity:1;transform:translateY(0) translateX(0)}}
 @keyframes flashGreen{0%{background:#EBF3E6}50%{background:#A8C496}100%{background:#EBF3E6}}
 .dash-row{transition:background .15s ease}
@@ -1948,10 +1905,10 @@ input,select,textarea{font-family:inherit}
 
 const S: Record<string, React.CSSProperties> = {
   root: {
-    minHeight: '100vh', background: '#F5F1EA', fontFamily: "'Noto Sans KR',sans-serif",
-    fontWeight: 300, color: '#1A1613', maxWidth: 800, margin: '0 auto',
+    minHeight: '100vh', background: '#F5F1EA', fontFamily: "'Pretendard','Noto Sans KR',sans-serif",
+    fontWeight: 400, color: '#1A1613', maxWidth: 800, margin: '0 auto',
     display: 'flex', flexDirection: 'column', gap: 12,
-    paddingBottom: 80,
+    paddingBottom: 80, fontSize: 14, lineHeight: 1.5,
   },
   // Header
   header: {
@@ -1964,11 +1921,11 @@ const S: Record<string, React.CSSProperties> = {
   hR: { display: 'flex', gap: 6, flexWrap: 'wrap' },
   brand: { display: 'flex', alignItems: 'center', gap: 6 },
   dot: { width: 5, height: 5, borderRadius: '50%', background: '#5F4B82', display: 'inline-block' },
-  bTxt: { fontFamily: "'Pretendard',sans-serif", fontSize: 11, letterSpacing: '.3em', color: '#4A3F38' },
+  bTxt: { fontSize: 11, letterSpacing: '.3em', color: '#4A3F38' },
   ms: { background: '#FAF6EF', border: '1px solid', padding: '4px 10px', borderRadius: 2, textAlign: 'right' as const, minWidth: 76 },
-  msL: { fontFamily: "'Pretendard',sans-serif", fontSize: 8, letterSpacing: '.1em', color: '#8A7D72', textTransform: 'uppercase' as const },
-  msD: { fontFamily: "'Pretendard',sans-serif", fontSize: 15, fontWeight: 400, lineHeight: 1.2 },
-  msDt: { fontFamily: "'Pretendard',sans-serif", fontStyle: 'italic', fontSize: 9, color: '#8A7D72' },
+  msL: { fontSize: 8, letterSpacing: '.1em', color: '#8A7D72', textTransform: 'uppercase' as const },
+  msD: { fontSize: 15, fontWeight: 400, lineHeight: 1.2 },
+  msDt: { fontStyle: 'italic', fontSize: 9, color: '#8A7D72' },
   // Command bar
   cmdBar: {
     position: 'sticky', top: 47, zIndex: 99,
@@ -1979,8 +1936,7 @@ const S: Record<string, React.CSSProperties> = {
   },
   cmdInput: {
     flex: 1, padding: '10px 14px', background: '#fff', border: '1px solid #DDD3C2', borderRadius: 6,
-    fontSize: 14, color: '#1A1613', outline: 'none', fontWeight: 300, fontFamily: "'Noto Sans KR',sans-serif",
-    minWidth: 200,
+    fontSize: 14, color: '#1A1613', outline: 'none', fontWeight: 300,    minWidth: 200,
   },
   cmdAddBtn: {
     padding: '10px 16px', background: '#1A1613', color: '#FAF6EF',
@@ -2000,16 +1956,15 @@ const S: Record<string, React.CSSProperties> = {
   // Stats
   stats: { display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 4, padding: '0 14px' },
   st: { background: '#FAF6EF', padding: '6px 10px', borderRadius: 2, borderLeft: '3px solid', display: 'flex', alignItems: 'baseline', gap: 4 },
-  stN: { fontFamily: "'Pretendard',sans-serif", fontSize: 'clamp(16px,3vw,22px)', lineHeight: 1 },
+  stN: { fontSize: 'clamp(16px,3vw,22px)', lineHeight: 1 },
   stL: { fontSize: 9, color: '#8A7D72' },
   // Collapsible sections
   section: { border: '1px solid #E8DFCE', borderRadius: 6, overflow: 'hidden', margin: '0 16px' },
   sectionHead: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%',
     padding: '8px 14px', background: '#FAF6EF', border: 'none', borderBottom: '1px solid #E8DFCE',
-    cursor: 'pointer', fontFamily: "'Noto Sans KR',sans-serif",
-  },
-  sectionTitle: { fontFamily: "'Pretendard',sans-serif", fontSize: 13, color: '#1A1613' },
+    cursor: 'pointer',  },
+  sectionTitle: { fontSize: 13, color: '#1A1613' },
   sectionToggle: { fontSize: 10, color: '#8A7D72' },
   sectionBody: { padding: 8 },
   // Cards
@@ -2022,7 +1977,7 @@ const S: Record<string, React.CSSProperties> = {
   ownB: { fontSize: 9, padding: '1px 6px', borderRadius: 100, fontWeight: 500, whiteSpace: 'nowrap' },
   cTitle: { fontSize: 12, fontWeight: 400, lineHeight: 1.4, marginBottom: 2 },
   cBot: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 4 },
-  cDate: { fontFamily: "'Pretendard',sans-serif", fontStyle: 'italic', fontSize: 10 },
+  cDate: { fontStyle: 'italic', fontSize: 10 },
   stBadge: { fontSize: 9, padding: '2px 7px', borderRadius: 100, fontWeight: 500 },
   // Board
   board: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 6 },
@@ -2047,10 +2002,10 @@ const S: Record<string, React.CSSProperties> = {
   backdrop: { position: 'fixed', inset: 0, background: 'rgba(26,22,19,.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 14 },
   modal: { background: '#FAF6EF', borderRadius: 8, width: '100%', maxWidth: 460, maxHeight: '90vh', overflow: 'auto', border: '1px solid #DDD3C2', boxShadow: '0 20px 60px rgba(26,22,19,.2)' },
   mHead: { padding: '12px 16px 8px', borderBottom: '1px solid #EFE7D6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  mTitle: { fontFamily: "'Pretendard',sans-serif", fontWeight: 400, fontSize: 17, margin: 0 },
+  mTitle: { fontWeight: 400, fontSize: 17, margin: 0 },
   mClose: { background: 'transparent', border: 'none', fontSize: 20, color: '#8A7D72', padding: 0 },
   mBody: { padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 8 },
-  label: { fontFamily: "'Pretendard',sans-serif", fontStyle: 'italic', fontSize: 11, color: '#8A7D72' },
+  label: { fontStyle: 'italic', fontSize: 11, color: '#8A7D72' },
   input: { padding: '9px 12px', background: '#fff', border: '1px solid #DDD3C2', borderRadius: 4, fontSize: 14, color: '#1A1613', outline: 'none', fontWeight: 300, width: '100%' },
   r2: { display: 'flex', gap: 8 },
   field: { flex: 1, display: 'flex', flexDirection: 'column', gap: 3 },
@@ -2060,6 +2015,6 @@ const S: Record<string, React.CSSProperties> = {
   savBtn: { padding: '6px 18px', background: '#1A1613', border: 'none', color: '#FAF6EF', borderRadius: 2, fontSize: 12, fontWeight: 500 },
   confirmBtn: { padding: '10px 20px', background: '#5F4B82', color: '#FAF6EF', border: 'none', borderRadius: 2, fontSize: 13, fontWeight: 500, width: '100%', marginTop: 8 },
   pChk: { width: 16, height: 16, borderRadius: 2, border: '1.5px solid', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, flexShrink: 0, marginTop: 1 },
-  footer: { padding: '12px 14px', borderTop: '1px solid #DDD3C2', display: 'flex', alignItems: 'center', gap: 8, fontFamily: "'Pretendard',sans-serif", fontStyle: 'italic', fontSize: 11, color: '#8A7D72', marginTop: 'auto' },
+  footer: { padding: '12px 14px', borderTop: '1px solid #DDD3C2', display: 'flex', alignItems: 'center', gap: 8, fontStyle: 'italic', fontSize: 11, color: '#8A7D72', marginTop: 'auto' },
   fLink: { background: 'transparent', border: 'none', fontSize: 10, color: '#B84848', textDecoration: 'underline', padding: 0, fontFamily: 'inherit', fontStyle: 'italic' },
 };
