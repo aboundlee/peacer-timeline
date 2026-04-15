@@ -933,6 +933,29 @@ function DashboardView({
   void onCycleOwner;
   const [openTracks, setOpenTracks] = useState<Set<string>>(() => new Set(['제품', '운영', '마케팅']));
   const [openPhases, setOpenPhases] = useState<Set<string>>(new Set());
+  const [extraPhases, setExtraPhases] = useState<Record<string, Phase[]>>({});
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('peacer-extra-phases');
+      if (raw) setExtraPhases(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  const addExtraPhase = (trackName: string, phaseName: string) => {
+    setExtraPhases(prev => {
+      const list = prev[trackName] || [];
+      if (list.some(p => p.name === phaseName)) return prev;
+      const next = { ...prev, [trackName]: [...list, { name: phaseName, projects: [phaseName] }] };
+      try { localStorage.setItem('peacer-extra-phases', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  const mergedTracks = useMemo(() =>
+    TRACKS.map(t => ({ ...t, phases: [...t.phases, ...(extraPhases[t.name] || [])] })),
+    [extraPhases]
+  );
 
   const handleEditCustomerCount = () => {
     const v = window.prompt('현재 고객 수', String(customerCount));
@@ -1009,7 +1032,7 @@ function DashboardView({
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const trackData: TrackData[] = TRACKS.map(track => {
+    const trackData: TrackData[] = mergedTracks.map(track => {
       const phases = track.phases
         .map(getPhaseStatus)
         .filter(p => p.total > 0);
@@ -1026,7 +1049,7 @@ function DashboardView({
     });
 
     // Uncategorized tasks (not in any track's phases)
-    const trackedProjects = new Set(TRACKS.flatMap(t => t.phases.flatMap(p => p.projects)));
+    const trackedProjects = new Set(mergedTracks.flatMap(t => t.phases.flatMap(p => p.projects)));
     const uncatTasks = tasks.filter(t => {
       const p = t.project || '기타';
       return !trackedProjects.has(p);
@@ -1135,7 +1158,7 @@ function DashboardView({
     }
 
     return { trackData, uncatTasks, uncatDone, totalDone, totalAll, projectedDate, projectedDaysOver, recentDone, blocker, blockerChain, blockerDays, personTasks, yesterdayDone, yesterdayByOwner, thisWeekDone, lastWeekDone, weekDelta };
-  }, [tasks, enriched, todayDate]);
+  }, [tasks, enriched, todayDate, mergedTracks]);
 
   const overallPct = data.totalAll > 0 ? Math.round((data.totalDone / data.totalAll) * 100) : 0;
   const shipDate = MST.find(m => m.label === '출하 목표');
@@ -1571,31 +1594,57 @@ function DashboardView({
                         </svg>
                       </div>
 
-                      {/* Phase expanded — show tasks */}
+                      {/* Phase expanded — show tasks + per-phase add-task button */}
                       {phaseOpen && (
                         <div style={{ padding: '2px 0 6px 34px', display: 'flex', flexDirection: 'column', gap: 1 }}>
                           {phase.tasks.map(t => renderTask(t))}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const trackCategory: Record<string, string> = { '제품': '제조', '운영': '사업자/인허가', '마케팅': '마케팅' };
+                              const phaseMeta = TRACKS.find(tr => tr.name === track.name)?.phases.find(p => p.name === phase.name);
+                              const firstProject = phase.tasks[0]?.project || phaseMeta?.projects[0] || '';
+                              onAddNew({
+                                category: trackCategory[track.name] || '기타',
+                                project: firstProject,
+                                deadline: phaseMeta?.target || null,
+                              });
+                            }}
+                            style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                              width: '100%', marginTop: 4, padding: '5px 12px',
+                              background: 'transparent', border: '1px dashed #D1D6DB',
+                              borderRadius: 6, color: '#8B95A1', fontSize: 11, fontWeight: 500,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
+                              <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+                            </svg>
+                            할 일 추가
+                          </button>
                         </div>
                       )}
                     </div>
                   );
                 })}
-                {/* Add task to this track */}
+                {/* Add new project (phase-level) — opens editor with new project name preset */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     const trackCategory: Record<string, string> = { '제품': '제조', '운영': '사업자/인허가', '마케팅': '마케팅' };
-                    const firstProject = track.phases[0]?.tasks[0]?.project
-                      || (TRACKS.find(tr => tr.name === track.name)?.phases[0]?.projects[0])
-                      || '';
+                    const name = window.prompt(`${track.name}에 새 프로젝트 이름을 입력하세요`);
+                    if (!name || !name.trim()) return;
+                    const phaseName = name.trim();
+                    addExtraPhase(track.name, phaseName);
                     onAddNew({
                       category: trackCategory[track.name] || '기타',
-                      project: firstProject,
+                      project: phaseName,
                     });
                   }}
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    width: '100%', marginTop: 4, padding: '6px 12px',
+                    width: '100%', marginTop: 6, padding: '6px 12px',
                     background: 'transparent', border: '1px dashed #D1D6DB',
                     borderRadius: 6, color: '#8B95A1', fontSize: 12, fontWeight: 500,
                     cursor: 'pointer',
@@ -1604,7 +1653,7 @@ function DashboardView({
                   <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
                     <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
                   </svg>
-                  {track.name}에 할 일 추가
+                  프로젝트 추가
                 </button>
               </div>
             )}
