@@ -107,7 +107,8 @@ export default function App() {
   const [datePickerId, setDatePickerId] = useState<string | null>(null);
   const [datePickerPos, setDatePickerPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const [cascadeConfirm, setCascadeConfirm] = useState<{ taskId: string; newDate: string; oldDate: string; downstream: AppTask[]; diffDays: number } | null>(null);
-  const [undoStack, setUndoStack] = useState<{ id: string; prev: Partial<AppTask>; label: string }[]>([]);
+  const [undoStack, setUndoStack] = useState<{ id: string; prev: Partial<AppTask>; label: string; at: number }[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; undoAction?: () => void } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cmdRef = useRef<HTMLInputElement>(null);
@@ -138,9 +139,19 @@ export default function App() {
     for (const key of Object.keys(updates)) {
       (prev as Record<string, unknown>)[key] = (task as Record<string, unknown>)[key];
     }
-    setUndoStack((stack) => [...stack.slice(-19), { id, prev, label }]);
+    setUndoStack((stack) => [...stack.slice(-49), { id, prev, label, at: Date.now() }]);
     up(id, updates);
   };
+
+  // Restore to a specific history point (by index). Applies that entry's prev snapshot
+  // and removes it + everything after from the stack.
+  const restoreFromHistory = useCallback((idx: number) => {
+    const entry = undoStack[idx];
+    if (!entry) return;
+    setUndoStack((stack) => stack.slice(0, idx));
+    up(entry.id, entry.prev);
+    showToast(`되돌림: ${entry.label}`);
+  }, [undoStack, showToast]);
 
   // Cmd+K to focus command bar, Cmd+Z to undo
   useEffect(() => {
@@ -491,18 +502,22 @@ export default function App() {
           </div>
         </div>
         <div style={S.hR}>
-          {MST.map((m, i) => {
-            const d = dU(m.date);
-            return (
-              <div key={i} style={{ ...S.ms, borderColor: d <= 2 ? '#B84848' : d <= 7 ? m.color : '#D5CCC0' }}>
-                <div style={S.msL}>{m.label}</div>
-                <div style={{ ...S.msD, color: d <= 0 ? '#B84848' : d <= 5 ? '#8B5A3C' : m.color }}>
-                  {d <= 0 ? (d === 0 ? 'D-DAY' : `D+${Math.abs(d)}`) : `D-${d}`}
-                </div>
-                <div style={S.msDt}>{m.date.replace(/-/g, '.')}</div>
-              </div>
-            );
-          })}
+          <button
+            onClick={() => setHistoryOpen(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 12px', borderRadius: 100,
+              background: '#F2F4F6', border: 'none', cursor: 'pointer',
+              fontSize: 12, fontWeight: 500, color: '#4E5968',
+            }}
+            title="수정 내역"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M7 3.5v3.5l2 1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M2 7a5 5 0 1 0 1.5-3.5M2 3v2h2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            내역
+          </button>
         </div>
       </header>
 
@@ -668,6 +683,89 @@ export default function App() {
             </button>
           )}
         </div>
+      )}
+
+      {/* ═══ HISTORY DRAWER ═══ */}
+      {historyOpen && (
+        <>
+          <div
+            onClick={() => setHistoryOpen(false)}
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,.24)', zIndex: 2500,
+              animation: 'fadeUp .15s ease-out',
+            }}
+          />
+          <div style={{
+            position: 'fixed', top: 0, right: 0, bottom: 0, width: 360, maxWidth: '92vw',
+            background: '#FFFFFF', zIndex: 2600,
+            display: 'flex', flexDirection: 'column',
+            boxShadow: '-4px 0 24px rgba(0,0,0,.08)',
+          }}>
+            <div style={{
+              padding: '20px 20px 14px', borderBottom: '1px solid #F2F4F6',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <div>
+                <div style={{ fontSize: 17, fontWeight: 700, color: '#191F28', letterSpacing: '-0.01em' }}>수정 내역</div>
+                <div style={{ fontSize: 12, color: '#8B95A1', marginTop: 2 }}>
+                  {undoStack.length === 0 ? '기록 없음' : `최근 ${undoStack.length}건`}
+                </div>
+              </div>
+              <button
+                onClick={() => setHistoryOpen(false)}
+                style={{
+                  width: 32, height: 32, borderRadius: '50%', border: 'none',
+                  background: '#F2F4F6', cursor: 'pointer', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center',
+                  fontSize: 16, color: '#4E5968',
+                }}
+              >✕</button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
+              {undoStack.length === 0 ? (
+                <div style={{ padding: 40, textAlign: 'center', color: '#8B95A1', fontSize: 13 }}>
+                  아직 수정한 내역이 없어요
+                </div>
+              ) : (
+                undoStack.slice().reverse().map((entry, revIdx) => {
+                  const idx = undoStack.length - 1 - revIdx;
+                  const task = tasks.find(t => t.id === entry.id);
+                  const elapsed = Math.floor((Date.now() - entry.at) / 1000);
+                  const timeLabel = elapsed < 60 ? '방금' : elapsed < 3600 ? `${Math.floor(elapsed / 60)}분 전` : elapsed < 86400 ? `${Math.floor(elapsed / 3600)}시간 전` : `${Math.floor(elapsed / 86400)}일 전`;
+                  return (
+                    <div key={idx} style={{
+                      padding: '12px 20px',
+                      display: 'flex', alignItems: 'flex-start', gap: 10,
+                      borderBottom: '1px solid #F8F9FA',
+                    }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: '#191F28', fontWeight: 500, lineHeight: 1.4 }}>
+                          {entry.label}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#8B95A1', marginTop: 3 }}>
+                          {timeLabel}{task ? '' : ' · 삭제된 항목'}
+                        </div>
+                      </div>
+                      {task && (
+                        <button
+                          onClick={() => restoreFromHistory(idx)}
+                          style={{
+                            padding: '5px 10px', borderRadius: 6,
+                            background: '#F2F4F6', border: 'none', cursor: 'pointer',
+                            fontSize: 11, fontWeight: 600, color: '#3182F6',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          되돌리기
+                        </button>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </>
       )}
 
       <footer style={S.footer}>
