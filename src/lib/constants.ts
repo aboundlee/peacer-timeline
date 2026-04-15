@@ -44,7 +44,7 @@ export const OKR = {
 // Tracks — top-level grouping for dashboard
 export const TRACKS: { name: string; emoji: string; goal: string; projects: string[] }[] = [
   { name: "제품", emoji: "🧴", goal: "출시일 맞추기", projects: ["샘플링", "본생산", "패키지 디자인", "패키지"] },
-  { name: "운영", emoji: "🏢", goal: "온라인 판매 인프�� 완성", projects: ["법인 설립", "인허가"] },
+  { name: "운영", emoji: "🏢", goal: "온라인 판매 인프라 완성", projects: ["법인 설립", "인허가"] },
   { name: "마케팅", emoji: "📣", goal: "출시 전 고객 100명", projects: ["프리오더 캠페인", "인플루언서 씨딩", "리뷰 채널"] },
 ];
 

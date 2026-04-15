@@ -916,9 +916,9 @@ function DashboardView({
   const daysLeft = shipDate ? dU(shipDate.date) : null;
 
   const statusIcon = (s: string) => {
-    if (s === 'done') return '✅';
+    if (s === 'done') return '🔵';
     if (s === 'overdue') return '🔴';
-    if (s === 'active') return '🔵';
+    if (s === 'active') return '🟢';
     if (s === 'blocked') return '⏸';
     return '⬜';
   };
@@ -941,7 +941,7 @@ function DashboardView({
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{
                 fontSize: 12,
-                color: proj.status === 'done' ? '#A8C496' : '#1A1613',
+                color: proj.status === 'done' ? '#5F4B82' : '#1A1613',
                 textDecoration: proj.status === 'done' ? 'line-through' : 'none',
               }}>
                 {proj.name}
@@ -1181,9 +1181,9 @@ function DashboardView({
                   {track.projects.map(p => (
                     <span key={p.name} title={`${p.name} ${p.done}/${p.total}`} style={{
                       width: 8, height: 8, borderRadius: '50%',
-                      background: p.status === 'done' ? '#A8C496'
+                      background: p.status === 'done' ? '#5F4B82'
                         : p.status === 'overdue' ? '#B84848'
-                        : p.status === 'active' ? '#5F4B82'
+                        : p.status === 'active' ? '#A8C496'
                         : p.status === 'blocked' ? '#C4A896'
                         : '#DDD3C2',
                     }} />
