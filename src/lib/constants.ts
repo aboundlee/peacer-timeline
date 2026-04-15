@@ -56,17 +56,17 @@ export const TRACKS: Track[] = [
     ],
   },
   {
-    name: "운영", emoji: "🏢", goal: "온라인 판매 인프라 완성", target: "2026-04-14",
+    name: "운영", emoji: "🏢", goal: "온라인 판매 인프라 완성", target: "2026-05-12",
     phases: [
       { name: "법인/사업자", projects: ["법인 설립"], target: "2026-04-18" },
       { name: "인허가", projects: ["인허가"], target: "2026-04-25" },
-      { name: "판매 인프라", projects: ["판매 인프라"], target: "2026-04-14" },
+      { name: "판매 인프라", projects: ["판매 인프라"], target: "2026-05-12" },
     ],
   },
   {
-    name: "마케팅", emoji: "📣", goal: "출시 전 고객 100명", target: "2026-04-14",
+    name: "마케팅", emoji: "📣", goal: "출시 전 고객 100명", target: "2026-05-19",
     phases: [
-      { name: "자체 채널", projects: ["리뷰 채널", "프리오더 캠페인"], target: "2026-04-14" },
+      { name: "자체 채널", projects: ["리뷰 채널", "프리오더 캠페인"], target: "2026-05-05" },
       { name: "씨딩", projects: ["인플루언서 씨딩"], target: "2026-04-28" },
     ],
   },

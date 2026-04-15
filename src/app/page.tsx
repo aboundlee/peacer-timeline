@@ -894,10 +894,10 @@ function DashboardView({
         className="dash-row"
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
-          padding: '8px 10px', borderRadius: 4,
+          padding: '8px 12px', borderRadius: 8,
           borderLeft: `2px solid ${isDone ? '#5F4B8233' : isOverdue ? '#B84848' : '#E8DFCE'}`,
           opacity: isDone ? 0.45 : 1,
-          minHeight: 36,
+          minHeight: 40,
         }}
       >
         <span
@@ -913,7 +913,7 @@ function DashboardView({
         <span
           onClick={() => onEdit(t.id)}
           style={{
-            flex: 1, fontSize: 13, cursor: 'pointer', lineHeight: 1.5,
+            flex: 1, fontSize: 14, cursor: 'pointer', lineHeight: 1.5,
             textDecoration: isDone ? 'line-through' : 'none',
             color: isDone ? '#AAA49C' : '#1A1613',
           }}
@@ -921,7 +921,7 @@ function DashboardView({
         {t.deadline && (
           <span
             onClick={(e) => { e.stopPropagation(); onDateClick(t.id, e); }}
-            style={{ fontSize: 10, color: isOverdue ? '#B84848' : '#AAA49C', fontStyle: 'italic', cursor: 'pointer', whiteSpace: 'nowrap' }}
+            style={{ fontSize: 12, color: isOverdue ? '#B84848' : '#AAA49C', cursor: 'pointer', whiteSpace: 'nowrap' }}
           >{fD(t.deadline)}</span>
         )}
         <span
@@ -1132,7 +1132,7 @@ function DashboardView({
                   )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                  <span style={{ fontSize: 12, color: '#AAA49C' }}>{track.done}/{track.total}</span>
+                  <span style={{ fontSize: 12, color: '#AAA49C' }}>{track.total - track.done}개 남음</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                     {track.phases.map((p, i) => (
                       <React.Fragment key={p.name}>
@@ -1189,7 +1189,7 @@ function DashboardView({
                             {dU(phase.target) < 0 ? `D+${Math.abs(dU(phase.target))}` : dU(phase.target) === 0 ? 'D-DAY' : `D-${dU(phase.target)}`}
                           </span>
                         )}
-                        <span style={{ fontSize: 12, color: '#B5AFA6' }}>{phase.done}/{phase.total}</span>
+                        <span style={{ fontSize: 12, color: '#B5AFA6' }}>{phase.total - phase.done}개 남음</span>
                         <span style={{
                           fontSize: 14, color: '#C5BFB6', fontWeight: 300,
                           transform: phaseOpen ? 'rotate(90deg)' : 'rotate(0deg)',
@@ -1222,7 +1222,7 @@ function DashboardView({
           >
             <span style={{ fontSize: 20, lineHeight: 1 }}>📌</span>
             <span style={{ fontSize: 15, fontWeight: 500, color: '#1A1613', flex: 1 }}>기타</span>
-            <span style={{ fontSize: 12, color: '#B5AFA6' }}>{data.uncatDone}/{data.uncatTasks.length}</span>
+            <span style={{ fontSize: 12, color: '#B5AFA6' }}>{data.uncatTasks.length - data.uncatDone}개 남음</span>
             <span style={{ fontSize: 14, color: '#C5BFB6', fontWeight: 300, transform: openTracks.has('기타') ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .2s ease' }}>&#x203A;</span>
           </div>
           {openTracks.has('기타') && (
@@ -1432,7 +1432,7 @@ function ProjectCards({
                 <div style={{ height: '100%', width: `${pct}%`, background: c.bd, borderRadius: 100, transition: 'width .5s ease' }} />
               </div>
               <span style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic', minWidth: 28 }}>
-                {proj.done}/{proj.total}
+                {proj.total - proj.done}개 남음
               </span>
               <span style={{
                 fontSize: 9, padding: '1px 5px', borderRadius: 100,
@@ -1922,10 +1922,10 @@ const S: Record<string, React.CSSProperties> = {
   brand: { display: 'flex', alignItems: 'center', gap: 6 },
   dot: { width: 5, height: 5, borderRadius: '50%', background: '#5F4B82', display: 'inline-block' },
   bTxt: { fontSize: 11, letterSpacing: '.3em', color: '#4A3F38' },
-  ms: { background: '#FAF6EF', border: '1px solid', padding: '4px 10px', borderRadius: 2, textAlign: 'right' as const, minWidth: 76 },
-  msL: { fontSize: 8, letterSpacing: '.1em', color: '#8A7D72', textTransform: 'uppercase' as const },
-  msD: { fontSize: 15, fontWeight: 400, lineHeight: 1.2 },
-  msDt: { fontStyle: 'italic', fontSize: 9, color: '#8A7D72' },
+  ms: { background: '#FAF6EF', border: '1px solid', padding: '4px 12px', borderRadius: 8, textAlign: 'right' as const, minWidth: 76 },
+  msL: { fontSize: 10, letterSpacing: '.05em', color: '#8A7D72' },
+  msD: { fontSize: 17, fontWeight: 600, lineHeight: 1.2 },
+  msDt: { fontSize: 10, color: '#AAA49C' },
   // Command bar
   cmdBar: {
     position: 'sticky', top: 47, zIndex: 99,
@@ -1948,10 +1948,10 @@ const S: Record<string, React.CSSProperties> = {
     padding: '0 14px',
   },
   filters: { display: 'flex', gap: 4 },
-  sel: { padding: '4px 6px', border: '1px solid #DDD3C2', borderRadius: 2, background: '#FAF6EF', fontSize: 10, color: '#4A3F38' },
+  sel: { padding: '6px 10px', border: '1px solid #DDD3C2', borderRadius: 8, background: '#FAF6EF', fontSize: 12, color: '#4A3F38' },
   toolBtn: {
-    padding: '4px 10px', background: '#FAF6EF', border: '1px solid #A896C4', borderRadius: 2,
-    color: '#5F4B82', fontSize: 10, fontWeight: 500, whiteSpace: 'nowrap',
+    padding: '6px 12px', background: '#FAF6EF', border: '1px solid #A896C4', borderRadius: 8,
+    color: '#5F4B82', fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
   },
   // Stats
   stats: { display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 4, padding: '0 14px' },
@@ -1959,17 +1959,17 @@ const S: Record<string, React.CSSProperties> = {
   stN: { fontSize: 'clamp(16px,3vw,22px)', lineHeight: 1 },
   stL: { fontSize: 9, color: '#8A7D72' },
   // Collapsible sections
-  section: { border: '1px solid #E8DFCE', borderRadius: 6, overflow: 'hidden', margin: '0 16px' },
+  section: { border: '1px solid #E8DFCE', borderRadius: 12, overflow: 'hidden', margin: '0 16px' },
   sectionHead: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%',
-    padding: '8px 14px', background: '#FAF6EF', border: 'none', borderBottom: '1px solid #E8DFCE',
+    padding: '12px 16px', background: '#FAF6EF', border: 'none', borderBottom: '1px solid #E8DFCE',
     cursor: 'pointer',  },
-  sectionTitle: { fontSize: 13, color: '#1A1613' },
-  sectionToggle: { fontSize: 10, color: '#8A7D72' },
+  sectionTitle: { fontSize: 14, fontWeight: 500, color: '#1A1613' },
+  sectionToggle: { fontSize: 12, color: '#AAA49C' },
   sectionBody: { padding: 8 },
   // Cards
   card: {
-    padding: '10px 12px', background: '#FAF6EF', borderLeft: '3px solid #DDD3C2', borderRadius: 4,
+    padding: '12px 16px', background: '#FAF6EF', borderLeft: '3px solid #DDD3C2', borderRadius: 12,
     cursor: 'pointer', transition: 'all .15s', animation: 'fadeUp .3s ease-out', userSelect: 'none',
   },
   cTop: { display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3, flexWrap: 'wrap' },
@@ -2000,20 +2000,20 @@ const S: Record<string, React.CSSProperties> = {
   dpNav: { background: 'transparent', border: '1px solid #DDD3C2', borderRadius: 2, padding: '2px 8px', color: '#4A3F38', fontSize: 13 },
   // Modal
   backdrop: { position: 'fixed', inset: 0, background: 'rgba(26,22,19,.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 14 },
-  modal: { background: '#FAF6EF', borderRadius: 8, width: '100%', maxWidth: 460, maxHeight: '90vh', overflow: 'auto', border: '1px solid #DDD3C2', boxShadow: '0 20px 60px rgba(26,22,19,.2)' },
+  modal: { background: '#FAF6EF', borderRadius: 16, width: '100%', maxWidth: 460, maxHeight: '90vh', overflow: 'auto', border: '1px solid #DDD3C2', boxShadow: '0 20px 60px rgba(26,22,19,.15)' },
   mHead: { padding: '12px 16px 8px', borderBottom: '1px solid #EFE7D6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   mTitle: { fontWeight: 400, fontSize: 17, margin: 0 },
   mClose: { background: 'transparent', border: 'none', fontSize: 20, color: '#8A7D72', padding: 0 },
   mBody: { padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 8 },
   label: { fontStyle: 'italic', fontSize: 11, color: '#8A7D72' },
-  input: { padding: '9px 12px', background: '#fff', border: '1px solid #DDD3C2', borderRadius: 4, fontSize: 14, color: '#1A1613', outline: 'none', fontWeight: 300, width: '100%' },
+  input: { padding: '10px 14px', background: '#fff', border: '1px solid #DDD3C2', borderRadius: 8, fontSize: 14, color: '#1A1613', outline: 'none', fontWeight: 400, width: '100%' },
   r2: { display: 'flex', gap: 8 },
   field: { flex: 1, display: 'flex', flexDirection: 'column', gap: 3 },
   mFoot: { padding: '8px 16px 12px', borderTop: '1px solid #EFE7D6', display: 'flex', gap: 8, alignItems: 'center' },
-  delBtn: { padding: '6px 12px', background: 'transparent', border: '1px solid #D4A4A4', color: '#B84848', borderRadius: 2, fontSize: 11 },
-  canBtn: { padding: '6px 14px', background: 'transparent', border: '1px solid #DDD3C2', color: '#8A7D72', borderRadius: 2, fontSize: 11 },
-  savBtn: { padding: '6px 18px', background: '#1A1613', border: 'none', color: '#FAF6EF', borderRadius: 2, fontSize: 12, fontWeight: 500 },
-  confirmBtn: { padding: '10px 20px', background: '#5F4B82', color: '#FAF6EF', border: 'none', borderRadius: 2, fontSize: 13, fontWeight: 500, width: '100%', marginTop: 8 },
+  delBtn: { padding: '8px 16px', background: 'transparent', border: '1px solid #D4A4A4', color: '#B84848', borderRadius: 8, fontSize: 12 },
+  canBtn: { padding: '8px 16px', background: 'transparent', border: '1px solid #DDD3C2', color: '#8A7D72', borderRadius: 8, fontSize: 12 },
+  savBtn: { padding: '8px 20px', background: '#1A1613', border: 'none', color: '#FAF6EF', borderRadius: 8, fontSize: 14, fontWeight: 500 },
+  confirmBtn: { padding: '12px 20px', background: '#5F4B82', color: '#FAF6EF', border: 'none', borderRadius: 8, fontSize: 14, fontWeight: 500, width: '100%', marginTop: 8 },
   pChk: { width: 16, height: 16, borderRadius: 2, border: '1.5px solid', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, flexShrink: 0, marginTop: 1 },
   footer: { padding: '12px 14px', borderTop: '1px solid #DDD3C2', display: 'flex', alignItems: 'center', gap: 8, fontStyle: 'italic', fontSize: 11, color: '#8A7D72', marginTop: 'auto' },
   fLink: { background: 'transparent', border: 'none', fontSize: 10, color: '#B84848', textDecoration: 'underline', padding: 0, fontFamily: 'inherit', fontStyle: 'italic' },
