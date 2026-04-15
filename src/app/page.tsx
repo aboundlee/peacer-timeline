@@ -800,6 +800,43 @@ function DashboardView({
       t.status === 'done' && t.updated_at &&
       new Date(t.updated_at) > sevenDaysAgo
     ).length;
+
+    // Yesterday completed (by owner)
+    const now = new Date();
+    const yesterdayStart = new Date(now);
+    yesterdayStart.setDate(now.getDate() - 1);
+    yesterdayStart.setHours(0, 0, 0, 0);
+    const todayStart = new Date(now);
+    todayStart.setHours(0, 0, 0, 0);
+    const yesterdayDoneTasks = tasks.filter(t => {
+      if (t.status !== 'done' || !t.updated_at) return false;
+      const u = new Date(t.updated_at);
+      return u >= yesterdayStart && u < todayStart;
+    });
+    const yesterdayDone = yesterdayDoneTasks.length;
+    const yesterdayByOwner: Record<string, number> = {};
+    yesterdayDoneTasks.forEach(t => {
+      yesterdayByOwner[t.owner] = (yesterdayByOwner[t.owner] || 0) + 1;
+    });
+
+    // This week (Mon-Sun) vs last week
+    const day = now.getDay();
+    const mondayOffset = day === 0 ? 6 : day - 1;
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - mondayOffset);
+    weekStart.setHours(0, 0, 0, 0);
+    const lastWeekStart = new Date(weekStart);
+    lastWeekStart.setDate(weekStart.getDate() - 7);
+    const thisWeekDone = tasks.filter(t => {
+      if (t.status !== 'done' || !t.updated_at) return false;
+      return new Date(t.updated_at) >= weekStart;
+    }).length;
+    const lastWeekDone = tasks.filter(t => {
+      if (t.status !== 'done' || !t.updated_at) return false;
+      const u = new Date(t.updated_at);
+      return u >= lastWeekStart && u < weekStart;
+    }).length;
+    const weekDelta = thisWeekDone - lastWeekDone;
     const remaining = totalAll - totalDone;
     let projectedDate: string | null = null;
     let projectedDaysOver: number | null = null;
@@ -853,7 +890,7 @@ function DashboardView({
         .slice(0, 4);
     }
 
-    return { trackData, uncatTasks, uncatDone, totalDone, totalAll, projectedDate, projectedDaysOver, recentDone, blocker, blockerChain, personTasks };
+    return { trackData, uncatTasks, uncatDone, totalDone, totalAll, projectedDate, projectedDaysOver, recentDone, blocker, blockerChain, personTasks, yesterdayDone, yesterdayByOwner, thisWeekDone, lastWeekDone, weekDelta };
   }, [tasks, enriched, todayDate]);
 
   const overallPct = data.totalAll > 0 ? Math.round((data.totalDone / data.totalAll) * 100) : 0;
@@ -957,37 +994,78 @@ function DashboardView({
   return (
     <div style={{ margin: '0 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-      {/* ═══ Hero — D-day + 전체 % ═══ */}
-      <div style={{ background: '#FFFFFF', border: '1px solid #ECE8E0', borderRadius: 12, padding: '24px 24px 20px' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 16, flexWrap: 'wrap' }}>
+      {/* ═══ Hero — Toss style ═══ */}
+      <div style={{ background: '#FFFFFF', border: '1px solid #F2F4F6', borderRadius: 20, padding: '28px 24px 24px' }}>
+        {/* Top: headline */}
+        <div style={{ fontSize: 13, color: '#8B95A1', fontWeight: 500, marginBottom: 6 }}>출시까지</div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
           {daysLeft != null && (
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span style={{ fontSize: 32, fontWeight: 700, color: '#1A1613', letterSpacing: '-0.02em', lineHeight: 1 }}>
-                {daysLeft < 0 ? `D+${Math.abs(daysLeft)}` : daysLeft === 0 ? 'D-DAY' : `D-${daysLeft}`}
-              </span>
-              <span style={{ fontSize: 12, color: '#8A7D72', fontWeight: 500 }}>출시까지</span>
-            </div>
-          )}
-          <div style={{ width: 1, height: 24, background: '#ECE8E0' }} />
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-            <span style={{ fontSize: 32, fontWeight: 700, color: '#5F4B82', letterSpacing: '-0.02em', lineHeight: 1 }}>
-              {overallPct}<span style={{ fontSize: 20 }}>%</span>
+            <span style={{ fontSize: 40, fontWeight: 700, color: '#191F28', letterSpacing: '-0.03em', lineHeight: 1 }}>
+              {daysLeft < 0 ? `D+${Math.abs(daysLeft)}` : daysLeft === 0 ? 'D-DAY' : `D-${daysLeft}`}
             </span>
-            <span style={{ fontSize: 12, color: '#8A7D72', fontWeight: 500 }}>전체 진행</span>
+          )}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+            <span style={{ fontSize: 24, fontWeight: 700, color: '#3182F6', letterSpacing: '-0.02em', lineHeight: 1 }}>
+              {overallPct}
+            </span>
+            <span style={{ fontSize: 14, fontWeight: 600, color: '#3182F6' }}>%</span>
           </div>
         </div>
-        <div style={{ width: '100%', height: 4, background: '#F0ECE3', borderRadius: 100, overflow: 'hidden', marginTop: 16 }}>
+        {/* Progress bar */}
+        <div style={{ width: '100%', height: 6, background: '#F2F4F6', borderRadius: 100, overflow: 'hidden', marginTop: 18 }}>
           <div style={{
             width: `${overallPct}%`, height: '100%', borderRadius: 100, transition: 'width .5s ease',
-            background: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#B84848' : '#5F4B82',
+            background: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#F04452' : '#3182F6',
           }} />
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, gap: 12 }}>
-          <span style={{ fontSize: 12, color: '#8A7D72', fontWeight: 400, lineHeight: 1.4, flex: 1, minWidth: 0 }}>{OKR.objective}</span>
+        {/* Stats row */}
+        <div style={{ display: 'flex', alignItems: 'stretch', gap: 0, marginTop: 20, borderTop: '1px solid #F2F4F6', paddingTop: 16 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, color: '#8B95A1', fontWeight: 500, marginBottom: 4 }}>어제 완료</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span style={{ fontSize: 20, fontWeight: 700, color: '#191F28', letterSpacing: '-0.02em' }}>
+                {data.yesterdayDone}<span style={{ fontSize: 13, fontWeight: 500, color: '#8B95A1' }}>개</span>
+              </span>
+              {data.yesterdayDone > 0 && (
+                <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>
+                  {Object.entries(data.yesterdayByOwner).map(([o, n]) => `${o} ${n}`).join(' · ')}
+                </span>
+              )}
+            </div>
+          </div>
+          <div style={{ width: 1, background: '#F2F4F6', margin: '0 16px' }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 12, color: '#8B95A1', fontWeight: 500, marginBottom: 4 }}>이번 주</div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span style={{ fontSize: 20, fontWeight: 700, color: '#191F28', letterSpacing: '-0.02em' }}>
+                {data.thisWeekDone}<span style={{ fontSize: 13, fontWeight: 500, color: '#8B95A1' }}>개</span>
+              </span>
+              {data.weekDelta !== 0 && (
+                <span style={{
+                  fontSize: 11, fontWeight: 600,
+                  color: data.weekDelta > 0 ? '#00B843' : '#F04452',
+                }}>
+                  {data.weekDelta > 0 ? '▲' : '▼'}{Math.abs(data.weekDelta)}
+                </span>
+              )}
+            </div>
+          </div>
           {data.projectedDate && (
-            <span style={{ fontSize: 11, color: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#B84848' : '#5C8A4E', fontWeight: 500, whiteSpace: 'nowrap' }}>
-              {data.projectedDaysOver != null && data.projectedDaysOver > 0 ? `${data.projectedDaysOver}일 초과 예상` : `${data.projectedDate} 완료 예상`}
-            </span>
+            <>
+              <div style={{ width: 1, background: '#F2F4F6', margin: '0 16px' }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, color: '#8B95A1', fontWeight: 500, marginBottom: 4 }}>완료 예상</div>
+                <div style={{
+                  fontSize: 14, fontWeight: 600,
+                  color: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#F04452' : '#191F28',
+                }}>
+                  {data.projectedDate}
+                  {data.projectedDaysOver != null && data.projectedDaysOver > 0 && (
+                    <span style={{ fontSize: 11, marginLeft: 4, fontWeight: 500 }}>+{data.projectedDaysOver}일</span>
+                  )}
+                </div>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -996,11 +1074,11 @@ function DashboardView({
       {data.blocker && (
         <div style={{
           background: '#FFFFFF',
-          border: '1px solid #ECE8E0',
-          borderRadius: 12, padding: '16px 20px',
-          borderLeft: `3px solid ${data.blocker.deadline && data.blocker.deadline < todayDate ? '#B84848' : '#5F4B82'}`,
+          border: '1px solid #F2F4F6',
+          borderRadius: 20, padding: '20px 24px',
+          borderLeft: `3px solid ${data.blocker.deadline && data.blocker.deadline < todayDate ? '#F04452' : '#3182F6'}`,
         }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#8A7D72', marginBottom: 10, letterSpacing: '.04em' }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: '#8B95A1', marginBottom: 10 }}>
             지금 막고 있는 것
           </div>
           <div
@@ -1008,11 +1086,11 @@ function DashboardView({
             className="dash-row"
             style={{ cursor: 'pointer', borderRadius: 4, padding: '2px 0', marginBottom: 4 }}
           >
-            <div style={{ fontSize: 15, fontWeight: 500, color: '#1A1613', lineHeight: 1.5, marginBottom: 4 }}>
+            <div style={{ fontSize: 17, fontWeight: 600, color: '#191F28', lineHeight: 1.4, marginBottom: 4, letterSpacing: '-0.01em' }}>
               {data.blocker.title}
             </div>
             {data.blockerChain.length > 0 && (
-              <div style={{ fontSize: 11, color: '#AAA49C', marginBottom: 4, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 12, color: '#8B95A1', marginBottom: 4, lineHeight: 1.5 }}>
                 이거 안 풀리면 → {data.blockerChain.slice(0, 3).join(' → ')}{data.blockerChain.length > 3 ? ` 외 ${data.blockerChain.length - 3}개` : ''} 밀림
               </div>
             )}
@@ -1064,11 +1142,11 @@ function DashboardView({
       )}
 
       {/* ═══ 오늘 할 것 ═══ */}
-      <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: '#8A7D72', letterSpacing: '.04em', marginBottom: 10, padding: '0 4px' }}>
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#191F28', marginBottom: 12, padding: '0 4px', letterSpacing: '-0.01em' }}>
           오늘 할 것
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         {OWNERS.filter(o => o !== '공동').map(owner => {
           const myTasks = data.personTasks[owner] || [];
           const oc = ownerColors[owner] || ownerColors['공동'];
@@ -1076,7 +1154,7 @@ function DashboardView({
           return (
             <div key={owner} style={{
               flex: '1 1 280px', minWidth: 0,
-              background: '#FFFFFF', border: '1px solid #ECE8E0', borderRadius: 12,
+              background: '#FFFFFF', border: '1px solid #F2F4F6', borderRadius: 16,
               overflow: 'hidden',
             }}>
               <div style={{ padding: '12px 16px 8px', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1105,13 +1183,13 @@ function DashboardView({
                         style={{ width: 18, height: 18, borderRadius: '50%', border: '2px solid #D5CCC0', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
                       />
                       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <span style={{ fontSize: 14, lineHeight: 1.4, color: '#1A1613' }}>{t.title}</span>
+                        <span style={{ fontSize: 14, lineHeight: 1.4, color: '#191F28', fontWeight: 500 }}>{t.title}</span>
                         {t.project && (
-                          <span style={{ fontSize: 11, color: '#AAA49C', fontWeight: 500 }}>{t.project}</span>
+                          <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>{t.project}</span>
                         )}
                       </div>
                       {t.deadline && (
-                        <span style={{ fontSize: 12, color: isOverdue ? '#B84848' : '#B5AFA6', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontSize: 12, color: isOverdue ? '#F04452' : '#8B95A1', whiteSpace: 'nowrap', fontWeight: 500 }}>
                           {fD(t.deadline)}
                         </span>
                       )}
@@ -1126,19 +1204,19 @@ function DashboardView({
       </div>
 
       {/* ═══ 트랙 > 절차(신호등) > TODO ═══ */}
-      <div style={{ marginTop: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: '#8A7D72', letterSpacing: '.04em', marginBottom: 10, padding: '0 4px' }}>
+      <div style={{ marginTop: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#191F28', marginBottom: 12, padding: '0 4px', letterSpacing: '-0.01em' }}>
           트랙
         </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {data.trackData.map(track => {
         const isOpen = openTracks.has(track.name);
         const pct = track.total > 0 ? Math.round((track.done / track.total) * 100) : 0;
         const accent = trackAccent[track.name] || trackAccent['기타'];
         return (
           <div key={track.name} style={{
-            background: accent.bg, border: '1px solid #ECE8E0', borderRadius: 12, overflow: 'hidden',
-            borderLeft: `3px solid ${track.hasOverdue ? '#B84848' : accent.dot}`,
+            background: accent.bg, border: '1px solid #F2F4F6', borderRadius: 16, overflow: 'hidden',
+            borderLeft: `3px solid ${track.hasOverdue ? '#F04452' : accent.dot}`,
           }}>
             {/* Track header */}
             <div
