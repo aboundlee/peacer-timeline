@@ -522,7 +522,7 @@ export default function App() {
       />
 
       {/* ─── QUICK ADD ─── */}
-      <div style={{ margin: '0 14px' }}>
+      <div style={{ margin: '0 16px' }}>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <input
             ref={cmdRef as React.RefObject<HTMLInputElement>}
@@ -726,7 +726,7 @@ export default function App() {
       <footer style={S.footer}>
         <span>PEACER</span>
         <button onClick={() => { if (confirm('새로고침?')) fetchTasks(); }} style={S.fLink}>새로고침</button>
-        <span style={{ marginLeft: 'auto', opacity: 0.5 }}>v9.3</span>
+        <span style={{ marginLeft: 'auto', opacity: 0.5 }}>v9.4</span>
       </footer>
     </div>
   );
@@ -923,6 +923,14 @@ function DashboardView({
     return '⬜';
   };
 
+  // Track accent colors for visual differentiation
+  const trackAccent: Record<string, { bg: string; border: string; dot: string }> = {
+    '제품': { bg: '#FDFBF8', border: '#E8DFCE', dot: '#5F4B82' },
+    '운영': { bg: '#F8FBFD', border: '#D4E1EC', dot: '#4A7A9B' },
+    '마케팅': { bg: '#FDFAF8', border: '#ECDAD4', dot: '#9B5A4A' },
+    '기타': { bg: '#FAF6EF', border: '#DDD3C2', dot: '#8A7D72' },
+  };
+
   // Render a project row with optional task expansion
   const renderProject = (proj: { name: string; emoji: string; done: number; total: number; status: string; nextAction: AppTask | null; waitingFor: string; tasks: AppTask[] }) => {
     const isOpen = openProjects.has(proj.name);
@@ -930,45 +938,47 @@ function DashboardView({
       <div key={proj.name}>
         <div
           onClick={() => toggleProject(proj.name)}
+          className="dash-row"
           style={{
-            display: 'flex', alignItems: 'center', gap: 8, padding: '5px 8px',
-            cursor: 'pointer', borderRadius: 2,
+            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+            cursor: 'pointer', borderRadius: 4,
             background: isOpen ? '#FDFBF7' : 'transparent',
+            minHeight: 40,
           }}
         >
-          <span style={{ fontSize: 13, lineHeight: 1, flexShrink: 0 }}>{statusIcon(proj.status)}</span>
+          <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0 }}>{statusIcon(proj.status)}</span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{
-                fontSize: 12,
+                fontSize: 13, fontWeight: 400,
                 color: proj.status === 'done' ? '#5F4B82' : '#1A1613',
                 textDecoration: proj.status === 'done' ? 'line-through' : 'none',
               }}>
                 {proj.name}
               </span>
-              <span style={{ fontSize: 9, color: '#AAA49C' }}>{proj.done}/{proj.total}</span>
+              <span style={{ fontSize: 10, color: '#B5AFA6', fontFamily: "'DM Serif Display',serif" }}>{proj.done}/{proj.total}</span>
             </div>
             {!isOpen && proj.status !== 'done' && proj.nextAction && (
-              <div style={{ fontSize: 10, color: '#5F4B82', marginTop: 1 }}>
+              <div style={{ fontSize: 11, color: '#5F4B82', marginTop: 3, lineHeight: 1.3 }}>
                 → {proj.nextAction.title}
-                <span style={{ color: '#8A7D72' }}> ({proj.nextAction.owner})</span>
+                <span style={{ color: '#AAA49C' }}> · {proj.nextAction.owner}</span>
               </div>
             )}
             {!isOpen && proj.status === 'blocked' && proj.waitingFor && (
-              <div style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic', marginTop: 1 }}>
+              <div style={{ fontSize: 11, color: '#AAA49C', fontStyle: 'italic', marginTop: 3 }}>
                 ← {proj.waitingFor} 완료 대기
               </div>
             )}
           </div>
           <span style={{
-            fontSize: 9, color: '#8A7D72',
+            fontSize: 11, color: '#B5AFA6',
             transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
             transition: 'transform .15s',
-          }}>→</span>
+          }}>›</span>
         </div>
         {/* Expanded tasks */}
         {isOpen && (
-          <div style={{ padding: '2px 0 6px 28px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div style={{ padding: '4px 0 10px 36px', display: 'flex', flexDirection: 'column', gap: 1 }}>
             {proj.tasks
               .sort((a, b) => {
                 if (a.status === 'done' && b.status !== 'done') return 1;
@@ -981,50 +991,53 @@ function DashboardView({
                 return (
                   <div
                     key={t.id}
+                    className="dash-row"
                     style={{
-                      display: 'flex', alignItems: 'center', gap: 6,
-                      padding: '4px 8px', borderRadius: 2,
-                      borderLeft: `2px solid ${isDone ? '#A8C49655' : isOverdue ? '#B84848' : '#E8DFCE'}`,
-                      opacity: isDone ? 0.5 : 1,
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '8px 10px', borderRadius: 4,
+                      borderLeft: `2px solid ${isDone ? '#5F4B8233' : isOverdue ? '#B84848' : '#E8DFCE'}`,
+                      opacity: isDone ? 0.45 : 1,
+                      minHeight: 36,
                     }}
                   >
                     <span
                       onClick={() => isDone ? onCycleStatus(t.id) : onMarkDone(t.id)}
                       style={{
-                        width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
-                        border: `1.5px solid ${isDone ? '#A8C496' : '#DDD3C2'}`,
-                        background: isDone ? '#A8C496' : 'transparent',
+                        width: 18, height: 18, borderRadius: '50%', flexShrink: 0,
+                        border: `2px solid ${isDone ? '#5F4B82' : '#D5CCC0'}`,
+                        background: isDone ? '#5F4B82' : 'transparent',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        cursor: 'pointer', fontSize: 8, color: '#fff',
+                        cursor: 'pointer', fontSize: 10, color: '#fff',
                       }}
                     >{isDone ? '✓' : ''}</span>
                     <span
                       onClick={() => onEdit(t.id)}
                       style={{
-                        flex: 1, fontSize: 11, cursor: 'pointer', lineHeight: 1.4,
+                        flex: 1, fontSize: 13, cursor: 'pointer', lineHeight: 1.5,
                         textDecoration: isDone ? 'line-through' : 'none',
-                        color: isDone ? '#8A7D72' : '#1A1613',
+                        color: isDone ? '#AAA49C' : '#1A1613',
                       }}
                     >{t.title}</span>
                     {t.deadline && (
                       <span
                         onClick={(e) => { e.stopPropagation(); onDateClick(t.id, e); }}
-                        style={{ fontSize: 9, color: isOverdue ? '#B84848' : '#8A7D72', fontStyle: 'italic', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                        style={{ fontSize: 10, color: isOverdue ? '#B84848' : '#AAA49C', fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', cursor: 'pointer', whiteSpace: 'nowrap' }}
                       >{fD(t.deadline)}</span>
                     )}
                     <span
                       onClick={() => onCycleOwner(t.id)}
                       style={{
-                        fontSize: 8, padding: '1px 5px', borderRadius: 100, cursor: 'pointer',
+                        fontSize: 10, padding: '2px 8px', borderRadius: 100, cursor: 'pointer',
                         background: ownerColors[t.owner]?.bg || ownerColors['공동'].bg,
                         color: ownerColors[t.owner]?.accent || ownerColors['공동'].accent,
+                        fontWeight: 400,
                       }}
                     >{t.owner}</span>
                     {!isDone && (
                       <span
                         onClick={() => onCycleStatus(t.id)}
                         style={{
-                          ...S.stBadge, cursor: 'pointer', fontSize: 8, padding: '1px 5px',
+                          cursor: 'pointer', fontSize: 10, padding: '2px 8px', borderRadius: 100, fontWeight: 400,
                           background: SC[t.status]?.bg, color: SC[t.status]?.tx,
                           border: `1px solid ${SC[t.status]?.bd}`,
                         }}
@@ -1040,39 +1053,39 @@ function DashboardView({
   };
 
   return (
-    <div style={{ margin: '0 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div style={{ margin: '0 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
       {/* ═══ BLOCK 1: Q2 목표 + 진행률 + 페이스 ═══ */}
-      <div style={{ background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 2, padding: '14px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 10, letterSpacing: '.15em', color: '#8A7D72' }}>Q2 목표</span>
+      <div style={{ background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 6, padding: '18px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <span style={{ fontSize: 11, letterSpacing: '.12em', color: '#AAA49C', fontWeight: 500, textTransform: 'uppercase' as const }}>Q2 목표</span>
           {daysLeft != null && (
             <span style={{
-              marginLeft: 'auto', fontFamily: "'DM Serif Display',serif", fontSize: 15,
+              marginLeft: 'auto', fontFamily: "'DM Serif Display',serif", fontSize: 17,
               color: daysLeft <= 7 ? '#B84848' : '#5F4B82', fontWeight: 400,
             }}>
               {daysLeft <= 0 ? `D+${Math.abs(daysLeft)}` : `D-${daysLeft}`}
             </span>
           )}
         </div>
-        <div style={{ fontSize: 15, fontWeight: 400, color: '#1A1613', marginBottom: 10, lineHeight: 1.4 }}>{OKR.objective}</div>
+        <div style={{ fontSize: 16, fontWeight: 500, color: '#1A1613', marginBottom: 14, lineHeight: 1.5 }}>{OKR.objective}</div>
         {/* Progress bar */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <div style={{ flex: 1, height: 8, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+          <div style={{ flex: 1, height: 6, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
             <div style={{
-              width: `${overallPct}%`, height: '100%', borderRadius: 100, transition: 'width .5s',
-              background: overallPct === 100 ? '#A8C496' : data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#B84848' : '#5F4B82',
+              width: `${overallPct}%`, height: '100%', borderRadius: 100, transition: 'width .5s ease',
+              background: overallPct === 100 ? '#5F4B82' : data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#B84848' : '#5F4B82',
             }} />
           </div>
-          <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 18, color: '#5F4B82', minWidth: 45, textAlign: 'right' as const }}>{overallPct}%</span>
+          <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 20, color: '#5F4B82', minWidth: 48, textAlign: 'right' as const }}>{overallPct}%</span>
         </div>
         {/* Pace prediction */}
-        <div style={{ fontSize: 11, color: '#8A7D72', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 12, color: '#AAA49C', display: 'flex', gap: 8, flexWrap: 'wrap', lineHeight: 1.5 }}>
           <span>{data.totalDone}/{data.totalAll} 완료</span>
-          {data.recentDone > 0 && <span>· 최근 7일 {data.recentDone}개 완료</span>}
+          {data.recentDone > 0 && <span>· 최근 7일 {data.recentDone}개</span>}
           {data.projectedDate && (
             <span style={{
-              color: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#B84848' : '#A8C496',
+              color: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#B84848' : '#5C8A4E',
               fontWeight: 500,
             }}>
               · 이 속도면 {data.projectedDate} 완료
@@ -1080,7 +1093,7 @@ function DashboardView({
               {data.projectedDaysOver != null && data.projectedDaysOver <= 0 && ` (목표 내)`}
             </span>
           )}
-          {data.recentDone === 0 && <span style={{ color: '#B84848', fontWeight: 500 }}>· 최근 7일 완료 없음 — 속도 측정 불가</span>}
+          {data.recentDone === 0 && <span style={{ color: '#B84848', fontWeight: 500 }}>· 최근 7일 완료 없음</span>}
         </div>
       </div>
 
@@ -1089,30 +1102,31 @@ function DashboardView({
         <div style={{
           background: data.blocker.deadline && data.blocker.deadline < todayDate ? '#FDF5F3' : '#FAF6EF',
           border: `1px solid ${data.blocker.deadline && data.blocker.deadline < todayDate ? '#D4A4A4' : '#DDD3C2'}`,
-          borderRadius: 2, padding: '12px 14px',
+          borderRadius: 6, padding: '16px 18px',
           borderLeft: `4px solid ${data.blocker.deadline && data.blocker.deadline < todayDate ? '#B84848' : '#5F4B82'}`,
         }}>
-          <div style={{ fontSize: 10, fontWeight: 500, color: data.blocker.deadline && data.blocker.deadline < todayDate ? '#B84848' : '#5F4B82', marginBottom: 6, letterSpacing: '.05em' }}>
-            {data.blocker.deadline && data.blocker.deadline < todayDate ? '🔴 지연 중 — 지금 제일 중요한 것' : '⚡ 지금 제일 중요한 것'}
+          <div style={{ fontSize: 11, fontWeight: 500, color: data.blocker.deadline && data.blocker.deadline < todayDate ? '#B84848' : '#5F4B82', marginBottom: 8, letterSpacing: '.04em' }}>
+            {data.blocker.deadline && data.blocker.deadline < todayDate ? '지연 중 — 지금 제일 중요한 것' : '지금 제일 중요한 것'}
           </div>
           <div
             onClick={() => onEdit(data.blocker!.id)}
-            style={{ cursor: 'pointer' }}
+            className="dash-row"
+            style={{ cursor: 'pointer', borderRadius: 4, padding: '2px 0', marginBottom: 4 }}
           >
-            <div style={{ fontSize: 14, fontWeight: 400, color: '#1A1613', lineHeight: 1.4, marginBottom: 4 }}>
+            <div style={{ fontSize: 15, fontWeight: 500, color: '#1A1613', lineHeight: 1.5, marginBottom: 4 }}>
               {data.blocker.title}
             </div>
             {data.blockerChain.length > 0 && (
-              <div style={{ fontSize: 10, color: '#8A7D72', marginBottom: 6, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 11, color: '#AAA49C', marginBottom: 4, lineHeight: 1.5 }}>
                 이거 안 풀리면 → {data.blockerChain.slice(0, 3).join(' → ')}{data.blockerChain.length > 3 ? ` 외 ${data.blockerChain.length - 3}개` : ''} 밀림
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
             <span
               onClick={() => onCycleOwner(data.blocker!.id)}
               style={{
-                ...S.ownB, cursor: 'pointer',
+                fontSize: 11, padding: '3px 10px', borderRadius: 100, cursor: 'pointer', fontWeight: 400,
                 background: ownerColors[data.blocker.owner]?.bg || ownerColors['공동'].bg,
                 color: ownerColors[data.blocker.owner]?.accent || ownerColors['공동'].accent,
               }}
@@ -1123,28 +1137,28 @@ function DashboardView({
               <span
                 onClick={(e) => onDateClick(data.blocker!.id, e)}
                 style={{
-                  fontSize: 10, fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', cursor: 'pointer',
-                  color: data.blocker.deadline < todayDate ? '#B84848' : '#8A7D72',
-                  padding: '1px 6px', borderRadius: 100,
+                  fontSize: 11, fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', cursor: 'pointer',
+                  color: data.blocker.deadline < todayDate ? '#B84848' : '#AAA49C',
+                  padding: '3px 10px', borderRadius: 100,
                   border: `1px solid ${data.blocker.deadline < todayDate ? '#D4A4A4' : '#E8DFCE'}`,
                 }}
               >
                 {fD(data.blocker.deadline)}
-                <span style={{ fontSize: 8, marginLeft: 3 }}>
+                <span style={{ fontSize: 9, marginLeft: 4 }}>
                   {dU(data.blocker.deadline) < 0 ? `D+${Math.abs(dU(data.blocker.deadline))}` : dU(data.blocker.deadline) === 0 ? 'TODAY' : `D-${dU(data.blocker.deadline)}`}
                 </span>
               </span>
             )}
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
               <span
                 onClick={() => onCycleStatus(data.blocker!.id)}
-                style={{ ...S.stBadge, background: SC[data.blocker.status]?.bg, color: SC[data.blocker.status]?.tx, border: `1px solid ${SC[data.blocker.status]?.bd}`, cursor: 'pointer' }}
+                style={{ fontSize: 11, padding: '3px 10px', borderRadius: 100, fontWeight: 400, background: SC[data.blocker.status]?.bg, color: SC[data.blocker.status]?.tx, border: `1px solid ${SC[data.blocker.status]?.bd}`, cursor: 'pointer' }}
               >
                 {SL[data.blocker.status]}
               </span>
               <span
                 onClick={() => onMarkDone(data.blocker!.id)}
-                style={{ width: 22, height: 22, borderRadius: 2, border: '2px solid #A8C496', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, color: '#A8C496', fontWeight: 600 }}
+                style={{ width: 28, height: 28, borderRadius: 6, border: '2px solid #5C8A4E', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 14, color: '#5C8A4E', fontWeight: 600 }}
               >✓</span>
             </div>
           </div>
@@ -1155,57 +1169,61 @@ function DashboardView({
       {data.trackData.map(track => {
         const isOpen = openTracks.has(track.name);
         const pct = track.total > 0 ? Math.round((track.done / track.total) * 100) : 0;
+        const accent = trackAccent[track.name] || trackAccent['기타'];
         return (
           <div key={track.name} style={{
-            background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 2, overflow: 'hidden',
+            background: accent.bg, border: `1px solid ${accent.border}`, borderRadius: 6, overflow: 'hidden',
             borderLeft: track.hasOverdue ? '3px solid #B84848' : undefined,
           }}>
             {/* Track header */}
             <div
               onClick={() => toggleTrack(track.name)}
+              className="dash-row"
               style={{
-                padding: '10px 14px', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '14px 16px', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 12,
+                minHeight: 48,
               }}
             >
-              <span style={{ fontSize: 16 }}>{track.emoji}</span>
+              <span style={{ fontSize: 20, lineHeight: 1 }}>{track.emoji}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13, color: '#1A1613' }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <span style={{ fontSize: 15, fontWeight: 500, color: '#1A1613' }}>
                     {track.name}
                   </span>
-                  <span style={{ fontSize: 10, color: '#8A7D72', fontStyle: 'italic' }}>{track.goal}</span>
+                  <span style={{ fontSize: 11, color: '#AAA49C' }}>{track.goal}</span>
                 </div>
                 {/* Progress dots */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 4 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
                   {track.projects.map(p => (
                     <span key={p.name} title={`${p.name} ${p.done}/${p.total}`} style={{
-                      width: 8, height: 8, borderRadius: '50%',
+                      width: 10, height: 10, borderRadius: '50%',
                       background: p.status === 'done' ? '#5F4B82'
                         : p.status === 'overdue' ? '#B84848'
-                        : p.status === 'active' ? '#A8C496'
+                        : p.status === 'active' ? '#5C8A4E'
                         : p.status === 'blocked' ? '#C4A896'
                         : '#DDD3C2',
+                      transition: 'background .3s',
                     }} />
                   ))}
-                  <span style={{ fontSize: 10, color: '#8A7D72', marginLeft: 4 }}>{track.done}/{track.total}</span>
+                  <span style={{ fontSize: 11, color: '#B5AFA6', marginLeft: 4, fontFamily: "'DM Serif Display',serif" }}>{track.done}/{track.total}</span>
                 </div>
               </div>
               {/* Track progress bar */}
-              <div style={{ width: 50, height: 4, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: `${pct}%`, background: track.hasOverdue ? '#B84848' : '#5F4B82', borderRadius: 100, transition: 'width .5s' }} />
+              <div style={{ width: 56, height: 6, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${pct}%`, background: track.hasOverdue ? '#B84848' : accent.dot, borderRadius: 100, transition: 'width .5s ease' }} />
               </div>
-              <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13, color: '#5F4B82', minWidth: 30, textAlign: 'right' as const }}>{pct}%</span>
+              <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 15, color: accent.dot, minWidth: 34, textAlign: 'right' as const }}>{pct}%</span>
               <span style={{
-                fontSize: 10, color: '#8A7D72',
+                fontSize: 14, color: '#C5BFB6', fontWeight: 300,
                 transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
-                transition: 'transform .15s',
-              }}>→</span>
+                transition: 'transform .2s ease',
+              }}>›</span>
             </div>
 
             {/* Track expanded — show projects */}
             {isOpen && (
-              <div style={{ borderTop: '1px solid #E8DFCE', padding: '4px 6px 8px' }}>
+              <div style={{ borderTop: `1px solid ${accent.border}`, padding: '6px 4px 10px' }}>
                 {track.projects.map(proj => renderProject(proj))}
               </div>
             )}
@@ -1215,18 +1233,19 @@ function DashboardView({
 
       {/* Uncategorized projects */}
       {data.uncategorized.length > 0 && (
-        <div style={{ background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{ background: '#FAF6EF', border: '1px solid #DDD3C2', borderRadius: 6, overflow: 'hidden' }}>
           <div
             onClick={() => toggleTrack('기타')}
-            style={{ padding: '10px 14px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10 }}
+            className="dash-row"
+            style={{ padding: '14px 16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, minHeight: 48 }}
           >
-            <span style={{ fontSize: 16 }}>📌</span>
-            <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13, color: '#1A1613', flex: 1 }}>기타</span>
-            <span style={{ fontSize: 10, color: '#8A7D72' }}>{data.uncategorized.length}개 프로젝트</span>
-            <span style={{ fontSize: 10, color: '#8A7D72', transform: openTracks.has('기타') ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .15s' }}>→</span>
+            <span style={{ fontSize: 20, lineHeight: 1 }}>📌</span>
+            <span style={{ fontSize: 15, fontWeight: 500, color: '#1A1613', flex: 1 }}>기타</span>
+            <span style={{ fontSize: 11, color: '#AAA49C' }}>{data.uncategorized.length}개 프로젝트</span>
+            <span style={{ fontSize: 14, color: '#C5BFB6', fontWeight: 300, transform: openTracks.has('기타') ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .2s ease' }}>›</span>
           </div>
           {openTracks.has('기타') && (
-            <div style={{ borderTop: '1px solid #E8DFCE', padding: '4px 6px 8px' }}>
+            <div style={{ borderTop: '1px solid #E8DFCE', padding: '6px 4px 10px' }}>
               {data.uncategorized.map(proj => renderProject(proj))}
             </div>
           )}
@@ -1234,58 +1253,63 @@ function DashboardView({
       )}
 
       {/* ═══ BLOCK 4: 오늘 할 것 — per person ═══ */}
-      {OWNERS.filter(o => o !== '공동').map(owner => {
-        const myTasks = data.personTasks[owner] || [];
-        const oc = ownerColors[owner] || ownerColors['공동'];
-        if (myTasks.length === 0) return null;
-        return (
-          <div key={owner} style={{
-            background: '#FAF6EF', border: '1px solid #E8DFCE', borderRadius: 2,
-            borderLeft: `3px solid ${oc.accent}`, overflow: 'hidden',
-          }}>
-            <div style={{ padding: '8px 12px', borderBottom: '1px solid #E8DFCE22', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontFamily: "'DM Serif Display',serif", fontSize: 13, color: oc.accent }}>{owner}의 오늘</span>
-              <span style={{ fontSize: 10, color: '#8A7D72' }}>{myTasks.length}개</span>
-            </div>
-            <div style={{ padding: '4px 8px 8px', display: 'flex', flexDirection: 'column', gap: 3 }}>
-              {myTasks.map(t => {
-                const isOverdue = t.deadline != null && t.deadline < todayDate;
-                return (
-                  <div
-                    key={t.id}
-                    onClick={() => onEdit(t.id)}
-                    style={{
-                      padding: '6px 8px', cursor: 'pointer', borderRadius: 2,
-                      borderLeft: `2px solid ${isOverdue ? '#B84848' : (t.blocksCount || 0) > 0 ? '#5F4B82' : '#E8DFCE'}`,
-                      display: 'flex', alignItems: 'center', gap: 6,
-                    }}
-                  >
-                    <span style={{ fontSize: 12, flex: 1, lineHeight: 1.4, color: '#1A1613' }}>{t.title}</span>
-                    {t.deadline && (
-                      <span
-                        onClick={(e) => { e.stopPropagation(); onDateClick(t.id, e); }}
-                        style={{ fontSize: 9, color: isOverdue ? '#B84848' : '#8A7D72', fontStyle: 'italic', cursor: 'pointer', whiteSpace: 'nowrap' }}
-                      >
-                        {fD(t.deadline)}
-                      </span>
-                    )}
-                    <span
-                      onClick={(e) => { e.stopPropagation(); onCycleStatus(t.id); }}
-                      style={{ ...S.stBadge, background: SC[t.status]?.bg, color: SC[t.status]?.tx, border: `1px solid ${SC[t.status]?.bd}`, cursor: 'pointer', fontSize: 8, padding: '1px 5px' }}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {OWNERS.filter(o => o !== '공동').map(owner => {
+          const myTasks = data.personTasks[owner] || [];
+          const oc = ownerColors[owner] || ownerColors['공동'];
+          if (myTasks.length === 0) return null;
+          return (
+            <div key={owner} style={{
+              flex: '1 1 280px', minWidth: 0,
+              background: '#FAF6EF', border: '1px solid #E8DFCE', borderRadius: 6,
+              borderTop: `3px solid ${oc.accent}`, overflow: 'hidden',
+            }}>
+              <div style={{ padding: '12px 14px 8px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 500, color: oc.accent }}>{owner}</span>
+                <span style={{ fontSize: 11, color: '#B5AFA6' }}>오늘 {myTasks.length}개</span>
+              </div>
+              <div style={{ padding: '0 10px 12px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {myTasks.map(t => {
+                  const isOverdue = t.deadline != null && t.deadline < todayDate;
+                  return (
+                    <div
+                      key={t.id}
+                      onClick={() => onEdit(t.id)}
+                      className="dash-row"
+                      style={{
+                        padding: '8px 10px', cursor: 'pointer', borderRadius: 4,
+                        borderLeft: `2px solid ${isOverdue ? '#B84848' : (t.blocksCount || 0) > 0 ? '#5F4B82' : '#E8DFCE'}`,
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        minHeight: 36,
+                      }}
                     >
-                      {SL[t.status]}
-                    </span>
-                    <span
-                      onClick={(e) => { e.stopPropagation(); onMarkDone(t.id); }}
-                      style={{ width: 18, height: 18, borderRadius: 2, border: '1.5px solid #A8C496', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 9, color: '#A8C496', flexShrink: 0 }}
-                    >✓</span>
-                  </div>
-                );
-              })}
+                      <span style={{ fontSize: 13, flex: 1, lineHeight: 1.5, color: '#1A1613' }}>{t.title}</span>
+                      {t.deadline && (
+                        <span
+                          onClick={(e) => { e.stopPropagation(); onDateClick(t.id, e); }}
+                          style={{ fontSize: 10, color: isOverdue ? '#B84848' : '#B5AFA6', fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                        >
+                          {fD(t.deadline)}
+                        </span>
+                      )}
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onCycleStatus(t.id); }}
+                        style={{ fontSize: 10, padding: '2px 8px', borderRadius: 100, fontWeight: 400, background: SC[t.status]?.bg, color: SC[t.status]?.tx, border: `1px solid ${SC[t.status]?.bd}`, cursor: 'pointer' }}
+                      >
+                        {SL[t.status]}
+                      </span>
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onMarkDone(t.id); }}
+                        style={{ width: 24, height: 24, borderRadius: 4, border: '2px solid #5C8A4E', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, color: '#5C8A4E', flexShrink: 0 }}
+                      >✓</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1935,8 +1959,11 @@ const CSS = `
 *{box-sizing:border-box;margin:0}
 button,select{cursor:pointer;font-family:inherit}
 input,select,textarea{font-family:inherit}
-@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px) translateX(0)}to{opacity:1;transform:translateY(0) translateX(0)}}
 @keyframes flashGreen{0%{background:#EBF3E6}50%{background:#A8C496}100%{background:#EBF3E6}}
+.dash-row{transition:background .15s ease}
+.dash-row:hover{background:rgba(95,75,130,.04) !important}
+.dash-row:active{background:rgba(95,75,130,.08) !important}
 @media(max-width:767px){
   .board-grid{grid-template-columns:1fr !important}
 }
@@ -1946,14 +1973,14 @@ const S: Record<string, React.CSSProperties> = {
   root: {
     minHeight: '100vh', background: '#F5F1EA', fontFamily: "'IBM Plex Sans KR',sans-serif",
     fontWeight: 300, color: '#1A1613', maxWidth: 800, margin: '0 auto',
-    display: 'flex', flexDirection: 'column', gap: 8,
+    display: 'flex', flexDirection: 'column', gap: 12,
     paddingBottom: 80,
   },
   // Header
   header: {
     position: 'sticky', top: 0, zIndex: 100,
-    display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8,
-    padding: '10px 14px',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10,
+    padding: '12px 16px',
     background: '#F5F1EA', borderBottom: '1px solid #DDD3C2',
   },
   hL: { display: 'flex', alignItems: 'center', gap: 8 },
@@ -1974,13 +2001,13 @@ const S: Record<string, React.CSSProperties> = {
     flexDirection: 'column',
   },
   cmdInput: {
-    flex: 1, padding: '8px 12px', background: '#fff', border: '1px solid #DDD3C2', borderRadius: 2,
-    fontSize: 13, color: '#1A1613', outline: 'none', fontWeight: 300, fontFamily: "'IBM Plex Sans KR',sans-serif",
+    flex: 1, padding: '10px 14px', background: '#fff', border: '1px solid #DDD3C2', borderRadius: 6,
+    fontSize: 14, color: '#1A1613', outline: 'none', fontWeight: 300, fontFamily: "'IBM Plex Sans KR',sans-serif",
     minWidth: 200,
   },
   cmdAddBtn: {
-    padding: '8px 14px', background: '#1A1613', color: '#FAF6EF',
-    border: 'none', borderRadius: 2, fontSize: 12, fontWeight: 500, whiteSpace: 'nowrap',
+    padding: '10px 16px', background: '#1A1613', color: '#FAF6EF',
+    border: 'none', borderRadius: 6, fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap',
   },
   // Filters
   filterBar: {
@@ -1999,7 +2026,7 @@ const S: Record<string, React.CSSProperties> = {
   stN: { fontFamily: "'DM Serif Display',serif", fontSize: 'clamp(16px,3vw,22px)', lineHeight: 1 },
   stL: { fontSize: 9, color: '#8A7D72' },
   // Collapsible sections
-  section: { border: '1px solid #E8DFCE', borderRadius: 2, overflow: 'hidden', margin: '0 14px' },
+  section: { border: '1px solid #E8DFCE', borderRadius: 6, overflow: 'hidden', margin: '0 16px' },
   sectionHead: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%',
     padding: '8px 14px', background: '#FAF6EF', border: 'none', borderBottom: '1px solid #E8DFCE',
@@ -2010,7 +2037,7 @@ const S: Record<string, React.CSSProperties> = {
   sectionBody: { padding: 8 },
   // Cards
   card: {
-    padding: '8px 10px', background: '#FAF6EF', borderLeft: '3px solid #DDD3C2', borderRadius: 2,
+    padding: '10px 12px', background: '#FAF6EF', borderLeft: '3px solid #DDD3C2', borderRadius: 4,
     cursor: 'pointer', transition: 'all .15s', animation: 'fadeUp .3s ease-out', userSelect: 'none',
   },
   cTop: { display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3, flexWrap: 'wrap' },
@@ -2041,13 +2068,13 @@ const S: Record<string, React.CSSProperties> = {
   dpNav: { background: 'transparent', border: '1px solid #DDD3C2', borderRadius: 2, padding: '2px 8px', color: '#4A3F38', fontSize: 13 },
   // Modal
   backdrop: { position: 'fixed', inset: 0, background: 'rgba(26,22,19,.45)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 14 },
-  modal: { background: '#FAF6EF', borderRadius: 2, width: '100%', maxWidth: 460, maxHeight: '90vh', overflow: 'auto', border: '1px solid #DDD3C2', boxShadow: '0 20px 60px rgba(26,22,19,.2)' },
+  modal: { background: '#FAF6EF', borderRadius: 8, width: '100%', maxWidth: 460, maxHeight: '90vh', overflow: 'auto', border: '1px solid #DDD3C2', boxShadow: '0 20px 60px rgba(26,22,19,.2)' },
   mHead: { padding: '12px 16px 8px', borderBottom: '1px solid #EFE7D6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   mTitle: { fontFamily: "'DM Serif Display',serif", fontWeight: 400, fontSize: 17, margin: 0 },
   mClose: { background: 'transparent', border: 'none', fontSize: 20, color: '#8A7D72', padding: 0 },
   mBody: { padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 8 },
   label: { fontFamily: "'DM Serif Display',serif", fontStyle: 'italic', fontSize: 11, color: '#8A7D72' },
-  input: { padding: '7px 10px', background: '#fff', border: '1px solid #DDD3C2', borderRadius: 2, fontSize: 13, color: '#1A1613', outline: 'none', fontWeight: 300, width: '100%' },
+  input: { padding: '9px 12px', background: '#fff', border: '1px solid #DDD3C2', borderRadius: 4, fontSize: 14, color: '#1A1613', outline: 'none', fontWeight: 300, width: '100%' },
   r2: { display: 'flex', gap: 8 },
   field: { flex: 1, display: 'flex', flexDirection: 'column', gap: 3 },
   mFoot: { padding: '8px 16px 12px', borderTop: '1px solid #EFE7D6', display: 'flex', gap: 8, alignItems: 'center' },
