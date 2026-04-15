@@ -54,14 +54,6 @@ export const PROJECT_META: Record<string, { goal: string; emoji: string; kr?: st
   "리뷰 채널": { goal: "1달 내 팔로우 100명 (오가닉)", emoji: "📱", kr: "NPS 달성 → 리뷰 20건" },
 };
 
-// Pipelines — workstream-level progress visualization
-// Each step = a project name from PROJECT_META
-export const PIPELINES = [
-  { name: "제품", emoji: "🧪", steps: ["샘플링", "패키지 디자인", "본생산", "패키지"] },
-  { name: "사업 기반", emoji: "🏢", steps: ["법인 설립", "인허가"] },
-  { name: "마케팅·세일즈", emoji: "📣", steps: ["리뷰 채널", "인플루언서 씨딩", "프리오더 캠페인"] },
-];
-
 // Utility functions
 export function dU(d: string | null): number {
   if (!d) return 999;
