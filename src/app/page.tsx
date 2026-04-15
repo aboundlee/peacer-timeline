@@ -1126,9 +1126,13 @@ function DashboardView({
             {data.weekDelta !== 0 && (
               <span style={{
                 fontSize: 11, fontWeight: 600,
-                color: data.weekDelta > 0 ? '#00B843' : '#F04452',
+                color: data.weekDelta > 0 ? '#22C55E' : '#F04452',
+                display: 'inline-flex', alignItems: 'center', gap: 2,
               }}>
-                {data.weekDelta > 0 ? '▲' : '▼'}{Math.abs(data.weekDelta)}
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ transform: data.weekDelta > 0 ? 'rotate(0deg)' : 'rotate(180deg)' }}>
+                  <path d="M5 2L8 6H2L5 2Z" fill="currentColor" />
+                </svg>
+                {Math.abs(data.weekDelta)}
               </span>
             )}
           </div>
@@ -1346,11 +1350,13 @@ function DashboardView({
                 </svg>
                 <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 600, minWidth: 24 }}>{pct}%</span>
               </div>
-              <span style={{
-                fontSize: 12, color: '#8B95A1', fontWeight: 400,
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{
+                color: '#8B95A1',
                 transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
-                transition: 'transform .2s ease',
-              }}>&#x203A;</span>
+                transition: 'transform .2s ease', flexShrink: 0,
+              }}>
+                <path d="M5.5 3.5L9 7l-3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
             </div>
 
             {/* Track expanded — show phases with signal lights */}
@@ -1385,11 +1391,13 @@ function DashboardView({
                             {dU(phase.target) < 0 ? `D+${Math.abs(dU(phase.target))}` : dU(phase.target) === 0 ? 'D-DAY' : `D-${dU(phase.target)}`}
                           </span>
                         )}
-                        <span style={{
-                          fontSize: 12, color: '#8B95A1', fontWeight: 400,
+                        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" style={{
+                          color: '#8B95A1',
                           transform: phaseOpen ? 'rotate(90deg)' : 'rotate(0deg)',
-                          transition: 'transform .2s ease',
-                        }}>&#x203A;</span>
+                          transition: 'transform .2s ease', flexShrink: 0,
+                        }}>
+                          <path d="M5.5 3.5L9 7l-3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
                       </div>
 
                       {/* Phase expanded — show tasks */}
@@ -1418,7 +1426,9 @@ function DashboardView({
           >
             <span style={{ fontSize: 14, fontWeight: 500, color: '#1A1613', flex: 1 }}>기타</span>
             <span style={{ fontSize: 12, color: '#B5AFA6' }}>{data.uncatTasks.length - data.uncatDone}개 남음</span>
-            <span style={{ fontSize: 14, color: '#C5BFB6', fontWeight: 300, transform: openTracks.has('기타') ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .2s ease' }}>&#x203A;</span>
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none" style={{ color: '#8B95A1', transform: openTracks.has('기타') ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform .2s ease', flexShrink: 0 }}>
+              <path d="M5.5 3.5L9 7l-3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </div>
           {openTracks.has('기타') && (
             <div style={{ borderTop: '1px solid #ECE8E0', padding: '6px 8px 10px' }}>
