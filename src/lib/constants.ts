@@ -12,7 +12,7 @@ export const CC: Record<string, { bg: string; bd: string; tx: string }> = {
 export const STS = ["todo", "doing", "waiting", "done"] as const;
 
 export const SL: Record<string, string> = {
-  todo: "할 일",
+  todo: "시작 전",
   doing: "진행중",
   waiting: "대기",
   done: "완료",
@@ -43,31 +43,31 @@ export const OKR = {
 
 // Track > Phase > Task structure
 // Phase.projects = list of `project` field values on tasks that belong to this phase
-export type Phase = { name: string; projects: string[] };
-export type Track = { name: string; emoji: string; goal: string; phases: Phase[] };
+export type Phase = { name: string; projects: string[]; target?: string };
+export type Track = { name: string; emoji: string; goal: string; target?: string; phases: Phase[] };
 
 export const TRACKS: Track[] = [
   {
-    name: "제품", emoji: "🧴", goal: "출시일 맞추기",
+    name: "제품", emoji: "🧴", goal: "출시일 맞추기", target: "2026-05-19",
     phases: [
-      { name: "샘플 테스트", projects: ["샘플링"] },
-      { name: "본생산 준비", projects: ["본생산", "패키지 디자인"] },
-      { name: "발주/출하", projects: ["패키지", "발주", "3PL"] },
+      { name: "샘플 테스트", projects: ["샘플링"], target: "2026-04-21" },
+      { name: "본생산 준비", projects: ["본생산", "패키지 디자인"], target: "2026-05-02" },
+      { name: "발주/출하", projects: ["패키지", "발주", "3PL"], target: "2026-05-19" },
     ],
   },
   {
-    name: "운영", emoji: "🏢", goal: "온라인 판매 인프라 완성",
+    name: "운영", emoji: "🏢", goal: "온라인 판매 인프라 완성", target: "2026-04-14",
     phases: [
-      { name: "법인/사업자", projects: ["법인 설립"] },
-      { name: "인허가", projects: ["인허가"] },
-      { name: "판매 인프라", projects: ["판매 인프라"] },
+      { name: "법인/사업자", projects: ["법인 설립"], target: "2026-04-18" },
+      { name: "인허가", projects: ["인허가"], target: "2026-04-25" },
+      { name: "판매 인프라", projects: ["판매 인프라"], target: "2026-04-14" },
     ],
   },
   {
-    name: "마케팅", emoji: "📣", goal: "출시 전 고객 100명",
+    name: "마케팅", emoji: "📣", goal: "출시 전 고객 100명", target: "2026-04-14",
     phases: [
-      { name: "자체 채널", projects: ["리뷰 채널", "프리오더 캠페인"] },
-      { name: "씨딩", projects: ["인플루언서 씨딩"] },
+      { name: "자체 채널", projects: ["리뷰 채널", "프리오더 캠페인"], target: "2026-04-14" },
+      { name: "씨딩", projects: ["인플루언서 씨딩"], target: "2026-04-28" },
     ],
   },
 ];

@@ -728,6 +728,7 @@ function DashboardView({
       status: 'done' | 'active' | 'overdue' | 'blocked' | 'todo';
       statusLabel: string;
       tasks: AppTask[];
+      target: string | null;
     };
 
     const getPhaseStatus = (phase: Phase): PhaseStatus => {
@@ -751,16 +752,20 @@ function DashboardView({
         return dU(a.deadline) - dU(b.deadline);
       });
 
-      return { name: phase.name, done: doneCount, total, status, statusLabel, tasks: sorted };
+      return { name: phase.name, done: doneCount, total, status, statusLabel, tasks: sorted, target: phase.target || null };
     };
 
     // Build track data with phases
     type TrackData = {
-      name: string; emoji: string; goal: string;
+      name: string; emoji: string; goal: string; target: string | null;
       done: number; total: number;
       phases: PhaseStatus[];
       hasOverdue: boolean;
+      weeklyDone: number;
     };
+
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
     const trackData: TrackData[] = TRACKS.map(track => {
       const phases = track.phases
@@ -769,7 +774,13 @@ function DashboardView({
       const done = phases.reduce((s, p) => s + p.done, 0);
       const total = phases.reduce((s, p) => s + p.total, 0);
       const hasOverdue = phases.some(p => p.status === 'overdue');
-      return { name: track.name, emoji: track.emoji, goal: track.goal, done, total, phases, hasOverdue };
+      // Weekly velocity per track
+      const trackProjects = new Set(track.phases.flatMap(p => p.projects));
+      const weeklyDone = tasks.filter(t =>
+        trackProjects.has(t.project || '') && t.status === 'done' && t.updated_at &&
+        new Date(t.updated_at) > sevenDaysAgo
+      ).length;
+      return { name: track.name, emoji: track.emoji, goal: track.goal, target: track.target || null, done, total, phases, hasOverdue, weeklyDone };
     });
 
     // Uncategorized tasks (not in any track's phases)
@@ -785,8 +796,6 @@ function DashboardView({
     const totalAll = tasks.length;
 
     // Pace prediction
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     const recentDone = tasks.filter(t =>
       t.status === 'done' && t.updated_at &&
       new Date(t.updated_at) > sevenDaysAgo
@@ -937,7 +946,7 @@ function DashboardView({
               textAlign: 'center', minWidth: 48,
             }}
           >
-            {STS.map(st => <option key={st} value={st}>{SL[st]}</option>)}
+            {STS.map(st => <option key={st} value={st} style={{ background: SC[st]?.bg, color: SC[st]?.tx }}>{SL[st]}</option>)}
           </select>
         )}
       </div>
@@ -1037,7 +1046,7 @@ function DashboardView({
                 onChange={(e) => onChangeStatus(data.blocker!.id, e.target.value)}
                 style={{ fontSize: 11, padding: '3px 8px', borderRadius: 100, fontWeight: 400, background: SC[data.blocker.status]?.bg, color: SC[data.blocker.status]?.tx, border: `1px solid ${SC[data.blocker.status]?.bd}`, cursor: 'pointer', appearance: 'none', WebkitAppearance: 'none', outline: 'none', textAlign: 'center', minWidth: 52 }}
               >
-                {STS.map(st => <option key={st} value={st}>{SL[st]}</option>)}
+                {STS.map(st => <option key={st} value={st} style={{ background: SC[st]?.bg, color: SC[st]?.tx }}>{SL[st]}</option>)}
               </select>
               <span
                 onClick={() => onMarkDone(data.blocker!.id)}
@@ -1094,7 +1103,7 @@ function DashboardView({
                         onChange={(e) => onChangeStatus(t.id, e.target.value)}
                         style={{ fontSize: 10, padding: '2px 6px', borderRadius: 100, fontWeight: 400, background: SC[t.status]?.bg, color: SC[t.status]?.tx, border: `1px solid ${SC[t.status]?.bd}`, cursor: 'pointer', appearance: 'none', WebkitAppearance: 'none', outline: 'none', textAlign: 'center', minWidth: 48 }}
                       >
-                        {STS.map(st => <option key={st} value={st}>{SL[st]}</option>)}
+                        {STS.map(st => <option key={st} value={st} style={{ background: SC[st]?.bg, color: SC[st]?.tx }}>{SL[st]}</option>)}
                       </select>
                       <span
                         onClick={(e) => { e.stopPropagation(); onMarkDone(t.id); }}
@@ -1137,21 +1146,36 @@ function DashboardView({
                   </span>
                   <span style={{ fontSize: 11, color: '#AAA49C' }}>{track.goal}</span>
                 </div>
-                {/* Phase signal dots */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 6 }}>
-                  {track.phases.map((p, i) => (
-                    <React.Fragment key={p.name}>
-                      <span title={`${p.name} ${p.done}/${p.total}`} style={{
-                        width: 10, height: 10, borderRadius: '50%',
-                        background: signalColor(p.status),
-                        transition: 'background .3s',
-                      }} />
-                      {i < track.phases.length - 1 && (
-                        <span style={{ width: 8, height: 1, background: '#D5CCC0' }} />
-                      )}
-                    </React.Fragment>
-                  ))}
-                  <span style={{ fontSize: 11, color: '#B5AFA6', marginLeft: 6, fontFamily: "'Pretendard',sans-serif" }}>{track.done}/{track.total}</span>
+                {/* Burndown line: D-day · remaining · velocity */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                  {track.target && (
+                    <span style={{ fontSize: 11, color: dU(track.target) < 0 ? '#B84848' : '#8A7D72', fontWeight: 500 }}>
+                      {dU(track.target) < 0 ? `D+${Math.abs(dU(track.target))}` : dU(track.target) === 0 ? 'D-DAY' : `D-${dU(track.target)}`}
+                    </span>
+                  )}
+                  <span style={{ fontSize: 11, color: '#AAA49C' }}>
+                    남은 TODO {track.total - track.done}개
+                  </span>
+                  {track.weeklyDone > 0 && (
+                    <span style={{ fontSize: 11, color: '#5C8A4E' }}>
+                      이번 주 {track.weeklyDone}개 완료
+                    </span>
+                  )}
+                  {/* Phase signal dots */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 4 }}>
+                    {track.phases.map((p, i) => (
+                      <React.Fragment key={p.name}>
+                        <span title={`${p.name} ${p.done}/${p.total}`} style={{
+                          width: 8, height: 8, borderRadius: '50%',
+                          background: signalColor(p.status),
+                          transition: 'background .3s',
+                        }} />
+                        {i < track.phases.length - 1 && (
+                          <span style={{ width: 6, height: 1, background: '#D5CCC0' }} />
+                        )}
+                      </React.Fragment>
+                    ))}
+                  </div>
                 </div>
               </div>
               <div style={{ width: 56, height: 6, background: '#E8DFCE', borderRadius: 100, overflow: 'hidden' }}>
@@ -1192,6 +1216,14 @@ function DashboardView({
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <span style={{ fontSize: 14, fontWeight: 400, color: '#1A1613' }}>{phase.name}</span>
                           <span style={{ fontSize: 11, color: '#B5AFA6', marginLeft: 8, fontFamily: "'Pretendard',sans-serif" }}>{phase.done}/{phase.total}</span>
+                          {phase.target && (
+                            <span style={{
+                              fontSize: 10, marginLeft: 8, fontWeight: 500,
+                              color: phase.status === 'done' ? '#5F4B82' : dU(phase.target) < 0 ? '#B84848' : '#AAA49C',
+                            }}>
+                              {phase.status === 'done' ? '완료' : dU(phase.target) < 0 ? `D+${Math.abs(dU(phase.target))}` : dU(phase.target) === 0 ? 'D-DAY' : `D-${dU(phase.target)}`}
+                            </span>
+                          )}
                         </div>
                         {/* Status label */}
                         <span style={{
@@ -1778,7 +1810,7 @@ function BoardView({
                           onChange={(e) => onChangeStatus(t.id, e.target.value)}
                           style={{ ...S.stBadge, background: SC[t.status]?.bg, color: SC[t.status]?.tx, border: `1px solid ${SC[t.status]?.bd}`, cursor: 'pointer', appearance: 'none', WebkitAppearance: 'none', outline: 'none', textAlign: 'center', minWidth: 48 }}
                         >
-                          {STS.map(st => <option key={st} value={st}>{SL[st]}</option>)}
+                          {STS.map(st => <option key={st} value={st} style={{ background: SC[st]?.bg, color: SC[st]?.tx }}>{SL[st]}</option>)}
                         </select>
                         {t.status !== 'done' && (
                           <span
