@@ -108,7 +108,7 @@ export default function App() {
   const [datePickerPos, setDatePickerPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
   const [ownerPickerId, setOwnerPickerId] = useState<string | null>(null);
   const [ownerPickerPos, setOwnerPickerPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
-  const [addingNew, setAddingNew] = useState(false);
+  const [addingNew, setAddingNew] = useState<Partial<AppTask> | null>(null);
   const [customerCount, setCustomerCount] = useState(0);
   const [cascadeConfirm, setCascadeConfirm] = useState<{ taskId: string; newDate: string; oldDate: string; downstream: AppTask[]; diffDays: number } | null>(null);
   const [undoStack, setUndoStack] = useState<{ id: string; prev: Partial<AppTask>; label: string; at: number }[]>([]);
@@ -639,7 +639,7 @@ export default function App() {
         onDateClick={(id, e) => { setDatePickerId(id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
         onCycleOwner={cycleOwner}
         onOwnerPick={openOwnerPicker}
-        onAddNew={() => setAddingNew(true)}
+        onAddNew={(preset) => setAddingNew(preset || {})}
         customerCount={customerCount}
         onUpdateCustomerCount={updateCustomerCount}
       />
@@ -780,8 +780,9 @@ export default function App() {
       {/* ─── ADD-NEW MODAL ─── */}
       {addingNew && (
         <Editor
-          onClose={() => setAddingNew(false)}
-          onSave={(t) => { add(t); setAddingNew(false); }}
+          initialValues={addingNew}
+          onClose={() => setAddingNew(null)}
+          onSave={(t) => { add(t); setAddingNew(null); }}
           allTasks={tasks}
         />
       )}
@@ -925,7 +926,7 @@ function DashboardView({
   onDateClick: (id: string, e: React.MouseEvent) => void;
   onCycleOwner: (id: string) => void;
   onOwnerPick: (id: string, e: React.MouseEvent) => void;
-  onAddNew: () => void;
+  onAddNew: (preset?: Partial<AppTask>) => void;
   customerCount: number;
   onUpdateCustomerCount: (n: number) => void;
 }) {
@@ -1382,7 +1383,7 @@ function DashboardView({
 
       {/* ═══ 할 일 추가 ═══ */}
       <button
-        onClick={onAddNew}
+        onClick={() => onAddNew()}
         style={{
           alignSelf: 'flex-start',
           display: 'flex', alignItems: 'center', gap: 6,
@@ -1579,6 +1580,32 @@ function DashboardView({
                     </div>
                   );
                 })}
+                {/* Add task to this track */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const trackCategory: Record<string, string> = { '제품': '제조', '운영': '사업자/인허가', '마케팅': '마케팅' };
+                    const firstProject = track.phases[0]?.tasks[0]?.project
+                      || (TRACKS.find(tr => tr.name === track.name)?.phases[0]?.projects[0])
+                      || '';
+                    onAddNew({
+                      category: trackCategory[track.name] || '기타',
+                      project: firstProject,
+                    });
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    width: '100%', marginTop: 4, padding: '6px 12px',
+                    background: 'transparent', border: '1px dashed #D1D6DB',
+                    borderRadius: 6, color: '#8B95A1', fontSize: 12, fontWeight: 500,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
+                    <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+                  </svg>
+                  {track.name}에 할 일 추가
+                </button>
               </div>
             )}
           </div>
@@ -2220,24 +2247,26 @@ function BoardView({
 // EDITOR MODAL
 // ═══════════════════════════════════════════════════
 function Editor({
-  task, onClose, onSave, onDelete, allTasks,
+  task, initialValues, onClose, onSave, onDelete, allTasks,
 }: {
   task?: AppTask;
+  initialValues?: Partial<AppTask>;
   onClose: () => void;
   onSave: (t: Partial<AppTask>) => void;
   onDelete?: () => void;
   allTasks: AppTask[];
 }) {
   const projectsList = [...new Set(allTasks.map((t) => t.project).filter(Boolean))];
+  const iv = initialValues || {};
   const [f, setF] = useState({
-    title: task?.title || '',
-    category: task?.category || '기타',
-    project: task?.project || '',
-    owner: task?.owner || OWNERS[0],
-    deadline: task?.deadline || '',
-    status: task?.status || 'todo',
-    note: task?.note || '',
-    priority: task?.priority || 'medium',
+    title: task?.title || iv.title || '',
+    category: task?.category || iv.category || '기타',
+    project: task?.project || iv.project || '',
+    owner: task?.owner || iv.owner || OWNERS[0],
+    deadline: task?.deadline || iv.deadline || '',
+    status: task?.status || iv.status || 'todo',
+    note: task?.note || iv.note || '',
+    priority: task?.priority || iv.priority || 'medium',
   });
   const s = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const save = () => {
