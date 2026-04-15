@@ -25,7 +25,13 @@ export const SC: Record<string, { bg: string; tx: string; bd: string }> = {
   done: { bg: "#EBF3E6", tx: "#3E5A2E", bd: "#A8C496" },
 };
 
-export const OWNERS = ["풍성", "은채", "공동"];
+export const OWNERS = ["풍성", "은채"];
+
+export const CUSTOMER_GOAL = {
+  label: "고객 모으기",
+  target: 500,
+  deadline: "2026-05-30",
+};
 
 export const MST = [
   { label: "프리오더 런칭", date: "2026-04-14", color: "#5F4B82" },
