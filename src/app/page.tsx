@@ -1129,13 +1129,7 @@ function DashboardView({
     for (const owner of OWNERS.filter(o => o !== '공동')) {
       personTasks[owner] = enriched
         .filter(t => t.isUnblocked && (t.owner === owner || t.owner === '공동'))
-        .sort((a, b) => {
-          const aOd = a.deadline && a.deadline < todayDate ? -1 : 0;
-          const bOd = b.deadline && b.deadline < todayDate ? -1 : 0;
-          if (aOd !== bOd) return aOd - bOd;
-          if ((b.blocksCount || 0) !== (a.blocksCount || 0)) return (b.blocksCount || 0) - (a.blocksCount || 0);
-          return dU(a.deadline) - dU(b.deadline);
-        })
+        .sort((a, b) => dU(a.deadline) - dU(b.deadline))
         .slice(0, 4);
     }
 
