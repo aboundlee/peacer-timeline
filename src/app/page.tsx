@@ -1090,81 +1090,67 @@ function DashboardView({
   };
 
   return (
-    <div style={{ margin: '0 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{ margin: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
 
-      {/* ═══ Hero — Toss style ═══ */}
-      <div style={{ background: '#FFFFFF', border: '1px solid #F2F4F6', borderRadius: 20, padding: '28px 24px 24px' }}>
-        {/* Top: headline */}
-        <div style={{ fontSize: 13, color: '#8B95A1', fontWeight: 500, marginBottom: 6 }}>출시까지</div>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+      {/* ═══ Hero — Linear-density + Toss palette ═══ */}
+      <div style={{ background: '#FFFFFF', border: '1px solid #E5E8EB', borderRadius: 10, padding: '14px 16px' }}>
+        {/* Top row — inline metrics */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
           {daysLeft != null && (
-            <span style={{ fontSize: 40, fontWeight: 700, color: '#191F28', letterSpacing: '-0.03em', lineHeight: 1 }}>
-              {daysLeft < 0 ? `D+${Math.abs(daysLeft)}` : daysLeft === 0 ? 'D-DAY' : `D-${daysLeft}`}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span style={{ fontSize: 22, fontWeight: 700, color: '#191F28', letterSpacing: '-0.02em', lineHeight: 1 }}>
+                {daysLeft < 0 ? `D+${Math.abs(daysLeft)}` : daysLeft === 0 ? 'D-DAY' : `D-${daysLeft}`}
+              </span>
+              <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>출시까지</span>
+            </div>
           )}
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-            <span style={{ fontSize: 24, fontWeight: 700, color: '#3182F6', letterSpacing: '-0.02em', lineHeight: 1 }}>
-              {overallPct}
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={{ fontSize: 22, fontWeight: 700, color: '#3182F6', letterSpacing: '-0.02em', lineHeight: 1 }}>
+              {overallPct}<span style={{ fontSize: 14, fontWeight: 600 }}>%</span>
             </span>
-            <span style={{ fontSize: 14, fontWeight: 600, color: '#3182F6' }}>%</span>
+            <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>전체</span>
           </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={{ fontSize: 16, fontWeight: 600, color: '#191F28', lineHeight: 1 }}>
+              {data.yesterdayDone}
+            </span>
+            <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>
+              어제 완료{data.yesterdayDone > 0 ? ` · ${Object.entries(data.yesterdayByOwner).map(([o, n]) => `${o} ${n}`).join(', ')}` : ''}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={{ fontSize: 16, fontWeight: 600, color: '#191F28', lineHeight: 1 }}>
+              {data.thisWeekDone}
+            </span>
+            <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>이번 주</span>
+            {data.weekDelta !== 0 && (
+              <span style={{
+                fontSize: 11, fontWeight: 600,
+                color: data.weekDelta > 0 ? '#00B843' : '#F04452',
+              }}>
+                {data.weekDelta > 0 ? '▲' : '▼'}{Math.abs(data.weekDelta)}
+              </span>
+            )}
+          </div>
+          {data.projectedDate && (
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 4 }}>
+              <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>완료 예상</span>
+              <span style={{
+                fontSize: 12, fontWeight: 600,
+                color: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#F04452' : '#191F28',
+              }}>
+                {data.projectedDate}
+                {data.projectedDaysOver != null && data.projectedDaysOver > 0 && ` +${data.projectedDaysOver}d`}
+              </span>
+            </div>
+          )}
         </div>
         {/* Progress bar */}
-        <div style={{ width: '100%', height: 6, background: '#F2F4F6', borderRadius: 100, overflow: 'hidden', marginTop: 18 }}>
+        <div style={{ width: '100%', height: 3, background: '#F2F4F6', borderRadius: 100, overflow: 'hidden', marginTop: 10 }}>
           <div style={{
             width: `${overallPct}%`, height: '100%', borderRadius: 100, transition: 'width .5s ease',
             background: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#F04452' : '#3182F6',
           }} />
-        </div>
-        {/* Stats row */}
-        <div style={{ display: 'flex', alignItems: 'stretch', gap: 0, marginTop: 20, borderTop: '1px solid #F2F4F6', paddingTop: 16 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, color: '#8B95A1', fontWeight: 500, marginBottom: 4 }}>어제 완료</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span style={{ fontSize: 20, fontWeight: 700, color: '#191F28', letterSpacing: '-0.02em' }}>
-                {data.yesterdayDone}<span style={{ fontSize: 13, fontWeight: 500, color: '#8B95A1' }}>개</span>
-              </span>
-              {data.yesterdayDone > 0 && (
-                <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>
-                  {Object.entries(data.yesterdayByOwner).map(([o, n]) => `${o} ${n}`).join(' · ')}
-                </span>
-              )}
-            </div>
-          </div>
-          <div style={{ width: 1, background: '#F2F4F6', margin: '0 16px' }} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, color: '#8B95A1', fontWeight: 500, marginBottom: 4 }}>이번 주</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span style={{ fontSize: 20, fontWeight: 700, color: '#191F28', letterSpacing: '-0.02em' }}>
-                {data.thisWeekDone}<span style={{ fontSize: 13, fontWeight: 500, color: '#8B95A1' }}>개</span>
-              </span>
-              {data.weekDelta !== 0 && (
-                <span style={{
-                  fontSize: 11, fontWeight: 600,
-                  color: data.weekDelta > 0 ? '#00B843' : '#F04452',
-                }}>
-                  {data.weekDelta > 0 ? '▲' : '▼'}{Math.abs(data.weekDelta)}
-                </span>
-              )}
-            </div>
-          </div>
-          {data.projectedDate && (
-            <>
-              <div style={{ width: 1, background: '#F2F4F6', margin: '0 16px' }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, color: '#8B95A1', fontWeight: 500, marginBottom: 4 }}>완료 예상</div>
-                <div style={{
-                  fontSize: 14, fontWeight: 600,
-                  color: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#F04452' : '#191F28',
-                }}>
-                  {data.projectedDate}
-                  {data.projectedDaysOver != null && data.projectedDaysOver > 0 && (
-                    <span style={{ fontSize: 11, marginLeft: 4, fontWeight: 500 }}>+{data.projectedDaysOver}일</span>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
         </div>
       </div>
 
@@ -1172,19 +1158,19 @@ function DashboardView({
       {data.blocker && (
         <div style={{
           background: '#FFFFFF',
-          border: '1px solid #F2F4F6',
-          borderRadius: 20, padding: '20px 24px',
+          border: '1px solid #E5E8EB',
+          borderRadius: 10, padding: '12px 16px',
           borderLeft: `3px solid ${data.blocker.deadline && data.blocker.deadline < todayDate ? '#F04452' : '#3182F6'}`,
         }}>
-          <div style={{ fontSize: 13, fontWeight: 500, color: '#8B95A1', marginBottom: 10 }}>
-            지금 막고 있는 것
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#8B95A1', marginBottom: 6, letterSpacing: '.02em' }}>
+            BLOCKER
           </div>
           <div
             onClick={() => onEdit(data.blocker!.id)}
             className="dash-row"
             style={{ cursor: 'pointer', borderRadius: 4, padding: '2px 0', marginBottom: 4 }}
           >
-            <div style={{ fontSize: 17, fontWeight: 600, color: '#191F28', lineHeight: 1.4, marginBottom: 4, letterSpacing: '-0.01em' }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#191F28', lineHeight: 1.4, marginBottom: 4, letterSpacing: '-0.01em' }}>
               {data.blocker.title}
             </div>
             {data.blockerChain.length > 0 && (
@@ -1240,11 +1226,11 @@ function DashboardView({
       )}
 
       {/* ═══ 오늘 할 것 ═══ */}
-      <div style={{ marginTop: 16 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: '#191F28', marginBottom: 12, padding: '0 4px', letterSpacing: '-0.01em' }}>
+      <div style={{ marginTop: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#4E5968', marginBottom: 6, padding: '0 2px', letterSpacing: '-0.01em' }}>
           오늘 할 것
         </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {OWNERS.filter(o => o !== '공동').map(owner => {
           const myTasks = data.personTasks[owner] || [];
           const oc = ownerColors[owner] || ownerColors['공동'];
@@ -1252,17 +1238,17 @@ function DashboardView({
           return (
             <div key={owner} style={{
               flex: '1 1 280px', minWidth: 0,
-              background: '#FFFFFF', border: '1px solid #F2F4F6', borderRadius: 16,
+              background: '#FFFFFF', border: '1px solid #E5E8EB', borderRadius: 10,
               overflow: 'hidden',
             }}>
-              <div style={{ padding: '12px 16px 8px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ padding: '8px 12px 4px', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{
                   width: 8, height: 8, borderRadius: '50%', background: oc.accent, flexShrink: 0,
                 }} />
                 <span style={{ fontSize: 14, fontWeight: 500, color: '#1A1613' }}>{owner}</span>
                 <span style={{ fontSize: 12, color: '#B5AFA6' }}>{myTasks.length}</span>
               </div>
-              <div style={{ padding: '0 8px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ padding: '0 6px 8px', display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {myTasks.map(t => {
                   const isOverdue = t.deadline != null && t.deadline < todayDate;
                   return (
@@ -1271,23 +1257,23 @@ function DashboardView({
                       onClick={() => onEdit(t.id)}
                       className="dash-row"
                       style={{
-                        padding: '6px 12px', cursor: 'pointer', borderRadius: 6,
+                        padding: '5px 10px', cursor: 'pointer', borderRadius: 5,
                         display: 'flex', alignItems: 'center', gap: 8,
-                        minHeight: 32,
+                        minHeight: 28,
                       }}
                     >
                       <span
                         onClick={(e) => { e.stopPropagation(); onMarkDone(t.id); }}
-                        style={{ width: 18, height: 18, borderRadius: '50%', border: '2px solid #D5CCC0', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+                        style={{ width: 14, height: 14, borderRadius: '50%', border: '1.5px solid #D1D6DB', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
                       />
-                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <span style={{ fontSize: 14, lineHeight: 1.4, color: '#191F28', fontWeight: 500 }}>{t.title}</span>
+                      <span style={{ fontSize: 13, lineHeight: 1.4, color: '#191F28', fontWeight: 500, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {t.title}
                         {t.project && (
-                          <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>{t.project}</span>
+                          <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500, marginLeft: 6 }}>{t.project}</span>
                         )}
-                      </div>
+                      </span>
                       {t.deadline && (
-                        <span style={{ fontSize: 12, color: isOverdue ? '#F04452' : '#8B95A1', whiteSpace: 'nowrap', fontWeight: 500 }}>
+                        <span style={{ fontSize: 11, color: isOverdue ? '#F04452' : '#8B95A1', whiteSpace: 'nowrap', fontWeight: 500 }}>
                           {fD(t.deadline)}
                         </span>
                       )}
@@ -1302,18 +1288,18 @@ function DashboardView({
       </div>
 
       {/* ═══ 트랙 > 절차(신호등) > TODO ═══ */}
-      <div style={{ marginTop: 16 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: '#191F28', marginBottom: 12, padding: '0 4px', letterSpacing: '-0.01em' }}>
+      <div style={{ marginTop: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#4E5968', marginBottom: 6, padding: '0 2px', letterSpacing: '-0.01em' }}>
           트랙
         </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {data.trackData.map(track => {
         const isOpen = openTracks.has(track.name);
         const pct = track.total > 0 ? Math.round((track.done / track.total) * 100) : 0;
         const accent = trackAccent[track.name] || trackAccent['기타'];
         return (
           <div key={track.name} style={{
-            background: accent.bg, border: '1px solid #F2F4F6', borderRadius: 16, overflow: 'hidden',
+            background: accent.bg, border: '1px solid #E5E8EB', borderRadius: 10, overflow: 'hidden',
             borderLeft: `3px solid ${track.hasOverdue ? '#F04452' : accent.dot}`,
           }}>
             {/* Track header */}
@@ -1321,40 +1307,36 @@ function DashboardView({
               onClick={() => toggleTrack(track.name)}
               className="dash-row"
               style={{
-                padding: '16px 20px', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 12,
-                minHeight: 56,
+                padding: '10px 14px', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 10,
+                minHeight: 40,
               }}
             >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                  <span style={{ fontSize: 15, fontWeight: 600, color: '#1A1613' }}>{track.name}</span>
-                  {track.target && (
-                    <span style={{ fontSize: 12, color: dU(track.target) < 0 ? '#B84848' : '#AAA49C', fontWeight: 500 }}>
-                      {dU(track.target) < 0 ? `D+${Math.abs(dU(track.target))}` : dU(track.target) === 0 ? 'D-DAY' : `D-${dU(track.target)}`}
-                    </span>
-                  )}
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 14, fontWeight: 600, color: '#191F28', letterSpacing: '-0.01em' }}>{track.name}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  {track.phases.map((p, i) => (
+                    <React.Fragment key={p.name}>
+                      <span title={p.name} style={{
+                        width: 6, height: 6, borderRadius: '50%',
+                        background: signalColor(p.status),
+                        transition: 'background .3s',
+                      }} />
+                      {i < track.phases.length - 1 && (
+                        <span style={{ width: 4, height: 1, background: '#E5E8EB' }} />
+                      )}
+                    </React.Fragment>
+                  ))}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    {track.phases.map((p, i) => (
-                      <React.Fragment key={p.name}>
-                        <span title={p.name} style={{
-                          width: 8, height: 8, borderRadius: '50%',
-                          background: signalColor(p.status),
-                          transition: 'background .3s',
-                        }} />
-                        {i < track.phases.length - 1 && (
-                          <span style={{ width: 6, height: 1, background: '#D5CCC0' }} />
-                        )}
-                      </React.Fragment>
-                    ))}
-                  </div>
-                </div>
+                {track.target && (
+                  <span style={{ fontSize: 11, color: dU(track.target) < 0 ? '#F04452' : '#8B95A1', fontWeight: 500 }}>
+                    {dU(track.target) < 0 ? `D+${Math.abs(dU(track.target))}` : dU(track.target) === 0 ? 'D-DAY' : `D-${dU(track.target)}`}
+                  </span>
+                )}
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <svg width="18" height="18" viewBox="0 0 18 18" style={{ transform: 'rotate(-90deg)' }}>
-                  <circle cx="9" cy="9" r="7" fill="none" stroke="#E8DFCE" strokeWidth="2" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <svg width="14" height="14" viewBox="0 0 18 18" style={{ transform: 'rotate(-90deg)' }}>
+                  <circle cx="9" cy="9" r="7" fill="none" stroke="#E5E8EB" strokeWidth="2" />
                   <circle
                     cx="9" cy="9" r="7" fill="none" stroke={accent.dot} strokeWidth="2"
                     strokeDasharray={`${(pct / 100) * 43.98} 43.98`}
@@ -1362,10 +1344,10 @@ function DashboardView({
                     style={{ transition: 'stroke-dasharray .5s ease' }}
                   />
                 </svg>
-                <span style={{ fontSize: 12, color: '#8A7D72', fontWeight: 500, minWidth: 26 }}>{pct}%</span>
+                <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 600, minWidth: 24 }}>{pct}%</span>
               </div>
               <span style={{
-                fontSize: 14, color: '#C5BFB6', fontWeight: 300,
+                fontSize: 12, color: '#8B95A1', fontWeight: 400,
                 transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
                 transition: 'transform .2s ease',
               }}>&#x203A;</span>
@@ -1373,38 +1355,38 @@ function DashboardView({
 
             {/* Track expanded — show phases with signal lights */}
             {isOpen && (
-              <div style={{ borderTop: `1px solid ${accent.border}`, padding: '8px 8px 12px' }}>
+              <div style={{ borderTop: '1px solid #F2F4F6', padding: '4px 6px 6px' }}>
                 {track.phases.map(phase => {
                   const phaseOpen = openPhases.has(`${track.name}/${phase.name}`);
                   const phasePct = phase.total > 0 ? Math.round((phase.done / phase.total) * 100) : 0;
                   return (
-                    <div key={phase.name} style={{ marginBottom: 4 }}>
+                    <div key={phase.name} style={{ marginBottom: 2 }}>
                       {/* Phase row */}
                       <div
                         onClick={() => togglePhase(`${track.name}/${phase.name}`)}
                         className="dash-row"
                         style={{
-                          display: 'flex', alignItems: 'center', gap: 12,
-                          padding: '8px 16px', cursor: 'pointer', borderRadius: 6,
-                          minHeight: 36,
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '5px 12px', cursor: 'pointer', borderRadius: 6,
+                          minHeight: 28,
                         }}
                       >
                         <span style={{
-                          width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
+                          width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
                           background: signalColor(phase.status),
-                          boxShadow: phase.status === 'overdue' ? '0 0 6px rgba(184,72,72,.4)' : 'none',
+                          boxShadow: phase.status === 'overdue' ? '0 0 4px rgba(240,68,82,.4)' : 'none',
                         }} />
-                        <span style={{ fontSize: 14, fontWeight: 400, color: '#1A1613', flex: 1 }}>{phase.name}</span>
+                        <span style={{ fontSize: 13, fontWeight: 500, color: '#4E5968', flex: 1 }}>{phase.name}</span>
                         {phase.target && phase.status !== 'done' && (
                           <span style={{
-                            fontSize: 12, fontWeight: 500,
-                            color: dU(phase.target) < 0 ? '#B84848' : '#AAA49C',
+                            fontSize: 11, fontWeight: 500,
+                            color: dU(phase.target) < 0 ? '#F04452' : '#8B95A1',
                           }}>
                             {dU(phase.target) < 0 ? `D+${Math.abs(dU(phase.target))}` : dU(phase.target) === 0 ? 'D-DAY' : `D-${dU(phase.target)}`}
                           </span>
                         )}
                         <span style={{
-                          fontSize: 14, color: '#C5BFB6', fontWeight: 300,
+                          fontSize: 12, color: '#8B95A1', fontWeight: 400,
                           transform: phaseOpen ? 'rotate(90deg)' : 'rotate(0deg)',
                           transition: 'transform .2s ease',
                         }}>&#x203A;</span>
@@ -2121,8 +2103,8 @@ const S: Record<string, React.CSSProperties> = {
   root: {
     minHeight: '100vh', background: '#FAFAF8', fontFamily: "'Pretendard','Noto Sans KR',sans-serif",
     fontWeight: 400, color: '#1A1613', maxWidth: 800, margin: '0 auto',
-    display: 'flex', flexDirection: 'column', gap: 12,
-    paddingBottom: 80, fontSize: 14, lineHeight: 1.5,
+    display: 'flex', flexDirection: 'column', gap: 8,
+    paddingBottom: 60, fontSize: 13, lineHeight: 1.5,
     fontVariantNumeric: 'tabular-nums',
   },
   // Header
