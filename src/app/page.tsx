@@ -113,6 +113,9 @@ export default function App() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cmdRef = useRef<HTMLInputElement>(null);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [unlocked, setUnlocked] = useState<boolean | null>(null);
+  const [passInput, setPassInput] = useState('');
+  const [passError, setPassError] = useState(false);
 
   // Show toast with optional undo
   const showToast = useCallback((message: string, undoAction?: () => void) => {
@@ -170,6 +173,25 @@ export default function App() {
     window.addEventListener('keydown', handleGlobalKey);
     return () => window.removeEventListener('keydown', handleGlobalKey);
   }, [undo]);
+
+  // Passcode gate — first-entry only
+  useEffect(() => {
+    try {
+      setUnlocked(localStorage.getItem('peacer-unlocked') === '1');
+    } catch {
+      setUnlocked(true);
+    }
+  }, []);
+
+  const tryUnlock = () => {
+    if (passInput === '5317') {
+      try { localStorage.setItem('peacer-unlocked', '1'); } catch { /* ignore */ }
+      setUnlocked(true);
+      setPassError(false);
+    } else {
+      setPassError(true);
+    }
+  };
 
   // Load collapsed state from localStorage
   useEffect(() => {
@@ -465,6 +487,63 @@ export default function App() {
     });
   };
 
+  // ─── Passcode gate (first entry only) ───
+  if (unlocked === null) return null;
+  if (!unlocked) {
+    return (
+      <div style={{
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: '#FAFAF8', padding: 20,
+      }}>
+        <div style={{
+          background: '#FFFFFF', border: '1px solid #E5E8EB', borderRadius: 12,
+          padding: '28px 24px', width: '100%', maxWidth: 320,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#191F28', marginBottom: 4, letterSpacing: '-0.01em' }}>
+            PEACER
+          </div>
+          <div style={{ fontSize: 12, color: '#8B95A1', marginBottom: 18 }}>
+            보안을 위해 코드를 입력해주세요
+          </div>
+          <input
+            type="password"
+            inputMode="numeric"
+            autoFocus
+            value={passInput}
+            onChange={(e) => { setPassInput(e.target.value); setPassError(false); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') tryUnlock(); }}
+            placeholder="코드"
+            style={{
+              width: '100%', fontSize: 14, padding: '10px 12px',
+              background: '#FFFFFF',
+              border: `1px solid ${passError ? '#F04452' : '#E5E8EB'}`,
+              borderRadius: 8, outline: 'none', color: '#191F28',
+              fontFamily: 'inherit', letterSpacing: '0.1em',
+              boxSizing: 'border-box',
+            }}
+          />
+          {passError && (
+            <div style={{ fontSize: 11, color: '#F04452', marginTop: 6 }}>
+              코드가 일치하지 않아요
+            </div>
+          )}
+          <button
+            onClick={tryUnlock}
+            disabled={!passInput.trim()}
+            style={{
+              width: '100%', fontSize: 13, fontWeight: 600, padding: '10px 0', marginTop: 12,
+              background: passInput.trim() ? '#3182F6' : '#E5E8EB',
+              color: passInput.trim() ? '#FFFFFF' : '#8B95A1',
+              border: 'none', borderRadius: 8,
+              cursor: passInput.trim() ? 'pointer' : 'not-allowed',
+            }}
+          >열기</button>
+        </div>
+      </div>
+    );
+  }
+
   // ─── Loading state ───
   if (!loaded) {
     return (
@@ -531,6 +610,7 @@ export default function App() {
         onMarkDone={markDone}
         onDateClick={(id, e) => { setDatePickerId(id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
         onCycleOwner={cycleOwner}
+        onAdd={add}
       />
 
       {/* ─── SECTION: 이번 주 ─── */}
@@ -783,7 +863,7 @@ export default function App() {
 // ═══════════════════════════════════════════════════
 function DashboardView({
   tasks, enriched, todayDate,
-  onEdit, onChangeStatus, onMarkDone, onDateClick, onCycleOwner,
+  onEdit, onChangeStatus, onMarkDone, onDateClick, onCycleOwner, onAdd,
 }: {
   tasks: AppTask[];
   enriched: AppTask[];
@@ -793,9 +873,20 @@ function DashboardView({
   onMarkDone: (id: string) => void;
   onDateClick: (id: string, e: React.MouseEvent) => void;
   onCycleOwner: (id: string) => void;
+  onAdd: (t: Partial<AppTask>) => void;
 }) {
   const [openTracks, setOpenTracks] = useState<Set<string>>(new Set());
   const [openPhases, setOpenPhases] = useState<Set<string>>(new Set());
+  const [quickInput, setQuickInput] = useState('');
+
+  const handleQuickAdd = () => {
+    const raw = quickInput.trim();
+    if (!raw) return;
+    const parsed = parseQuickInput(raw);
+    if (!parsed.title) return;
+    onAdd(parsed);
+    setQuickInput('');
+  };
 
   const toggleTrack = (name: string) => {
     setOpenTracks(prev => { const n = new Set(prev); if (n.has(name)) n.delete(name); else n.add(name); return n; });
@@ -963,6 +1054,14 @@ function DashboardView({
       })[0] || null;
 
     let blockerChain: string[] = [];
+    let blockerDays: number | null = null;
+    if (blocker?.created_at) {
+      const c = new Date(blocker.created_at);
+      c.setHours(0, 0, 0, 0);
+      const t0 = new Date();
+      t0.setHours(0, 0, 0, 0);
+      blockerDays = Math.max(1, Math.floor((t0.getTime() - c.getTime()) / 864e5) + 1);
+    }
     if (blocker) {
       const getChain = (id: string, depth: number): string[] => {
         if (depth > 4) return [];
@@ -988,7 +1087,7 @@ function DashboardView({
         .slice(0, 4);
     }
 
-    return { trackData, uncatTasks, uncatDone, totalDone, totalAll, projectedDate, projectedDaysOver, recentDone, blocker, blockerChain, personTasks, yesterdayDone, yesterdayByOwner, thisWeekDone, lastWeekDone, weekDelta };
+    return { trackData, uncatTasks, uncatDone, totalDone, totalAll, projectedDate, projectedDaysOver, recentDone, blocker, blockerChain, blockerDays, personTasks, yesterdayDone, yesterdayByOwner, thisWeekDone, lastWeekDone, weekDelta };
   }, [tasks, enriched, todayDate]);
 
   const overallPct = data.totalAll > 0 ? Math.round((data.totalDone / data.totalAll) * 100) : 0;
@@ -1092,9 +1191,9 @@ function DashboardView({
   return (
     <div style={{ margin: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
 
-      {/* ═══ Hero — Linear-density + Toss palette ═══ */}
+      {/* ═══ Hero — outcome-first (v14) ═══ */}
       <div style={{ background: '#FFFFFF', border: '1px solid #E5E8EB', borderRadius: 10, padding: '14px 16px' }}>
-        {/* Top row — inline metrics */}
+        {/* Primary row — ship status & delay */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
           {daysLeft != null && (
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
@@ -1104,50 +1203,25 @@ function DashboardView({
               <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>출시까지</span>
             </div>
           )}
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-            <span style={{ fontSize: 22, fontWeight: 700, color: '#3182F6', letterSpacing: '-0.02em', lineHeight: 1 }}>
-              {overallPct}<span style={{ fontSize: 14, fontWeight: 600 }}>%</span>
-            </span>
-            <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>전체</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-            <span style={{ fontSize: 16, fontWeight: 600, color: '#191F28', lineHeight: 1 }}>
-              {data.yesterdayDone}
-            </span>
-            <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>
-              어제 완료{data.yesterdayDone > 0 ? ` · ${Object.entries(data.yesterdayByOwner).map(([o, n]) => `${o} ${n}`).join(', ')}` : ''}
-            </span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-            <span style={{ fontSize: 16, fontWeight: 600, color: '#191F28', lineHeight: 1 }}>
-              {data.thisWeekDone}
-            </span>
-            <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>이번 주</span>
-            {data.weekDelta !== 0 && (
-              <span style={{
-                fontSize: 11, fontWeight: 600,
-                color: data.weekDelta > 0 ? '#22C55E' : '#F04452',
-                display: 'inline-flex', alignItems: 'center', gap: 2,
-              }}>
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style={{ transform: data.weekDelta > 0 ? 'rotate(0deg)' : 'rotate(180deg)' }}>
-                  <path d="M5 2L8 6H2L5 2Z" fill="currentColor" />
-                </svg>
-                {Math.abs(data.weekDelta)}
+          {data.projectedDaysOver != null && data.projectedDaysOver > 0 ? (
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span style={{ fontSize: 22, fontWeight: 700, color: '#F04452', letterSpacing: '-0.02em', lineHeight: 1 }}>
+                +{data.projectedDaysOver}일
               </span>
-            )}
-          </div>
-          {data.projectedDate && (
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 4 }}>
-              <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>완료 예상</span>
-              <span style={{
-                fontSize: 12, fontWeight: 600,
-                color: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#F04452' : '#191F28',
-              }}>
-                {data.projectedDate}
-                {data.projectedDaysOver != null && data.projectedDaysOver > 0 && ` +${data.projectedDaysOver}d`}
+              <span style={{ fontSize: 11, color: '#F04452', fontWeight: 500 }}>지연 예상</span>
+            </div>
+          ) : data.projectedDate && (
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#22C55E', lineHeight: 1 }}>
+                일정 내
               </span>
+              <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>완료 예상 {data.projectedDate}</span>
             </div>
           )}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'baseline', gap: 4 }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: '#8B95A1' }}>진행률</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#4E5968' }}>{overallPct}%</span>
+          </div>
         </div>
         {/* Progress bar */}
         <div style={{ width: '100%', height: 3, background: '#F2F4F6', borderRadius: 100, overflow: 'hidden', marginTop: 10 }}>
@@ -1155,6 +1229,29 @@ function DashboardView({
             width: `${overallPct}%`, height: '100%', borderRadius: 100, transition: 'width .5s ease',
             background: data.projectedDaysOver != null && data.projectedDaysOver > 0 ? '#F04452' : '#3182F6',
           }} />
+        </div>
+        {/* Secondary row — velocity (demoted: output, not outcome) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', marginTop: 10, paddingTop: 10, borderTop: '1px solid #F2F4F6' }}>
+          <span style={{ fontSize: 10, fontWeight: 600, color: '#B0B8C1', letterSpacing: '.04em' }}>VELOCITY</span>
+          <span style={{ fontSize: 11, color: '#8B95A1' }}>
+            어제 <span style={{ color: '#4E5968', fontWeight: 600 }}>{data.yesterdayDone}</span>
+            {data.yesterdayDone > 0 && ` · ${Object.entries(data.yesterdayByOwner).map(([o, n]) => `${o} ${n}`).join(', ')}`}
+          </span>
+          <span style={{ fontSize: 11, color: '#8B95A1' }}>
+            이번 주 <span style={{ color: '#4E5968', fontWeight: 600 }}>{data.thisWeekDone}</span>
+            {data.weekDelta !== 0 && (
+              <span style={{
+                marginLeft: 4, fontWeight: 500,
+                color: data.weekDelta > 0 ? '#22C55E' : '#F04452',
+                display: 'inline-flex', alignItems: 'center', gap: 2,
+              }}>
+                <svg width="8" height="8" viewBox="0 0 10 10" fill="none" style={{ transform: data.weekDelta > 0 ? 'rotate(0deg)' : 'rotate(180deg)' }}>
+                  <path d="M5 2L8 6H2L5 2Z" fill="currentColor" />
+                </svg>
+                {Math.abs(data.weekDelta)}
+              </span>
+            )}
+          </span>
         </div>
       </div>
 
@@ -1166,8 +1263,21 @@ function DashboardView({
           borderRadius: 10, padding: '12px 16px',
           borderLeft: `3px solid ${data.blocker.deadline && data.blocker.deadline < todayDate ? '#F04452' : '#3182F6'}`,
         }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#8B95A1', marginBottom: 6, letterSpacing: '.02em' }}>
-            BLOCKER
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#8B95A1', letterSpacing: '.02em' }}>
+              BLOCKER
+            </span>
+            {data.blockerDays != null && (
+              <span style={{
+                fontSize: 10, fontWeight: 600,
+                padding: '2px 6px', borderRadius: 100,
+                background: data.blockerDays >= 3 ? '#FFF0F2' : '#F2F4F6',
+                color: data.blockerDays >= 3 ? '#F04452' : '#8B95A1',
+                letterSpacing: '.02em',
+              }}>
+                {data.blockerDays}일째 막힘
+              </span>
+            )}
           </div>
           <div
             onClick={() => onEdit(data.blocker!.id)}
@@ -1228,6 +1338,34 @@ function DashboardView({
           </div>
         </div>
       )}
+
+      {/* ═══ Quick Add ═══ */}
+      <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+        <input
+          type="text"
+          value={quickInput}
+          onChange={(e) => setQuickInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleQuickAdd(); }}
+          placeholder="할 일 추가… (예: 샘플 발주, 풍성, 내일, 긴급)"
+          style={{
+            flex: 1, fontSize: 13, padding: '8px 12px',
+            background: '#FFFFFF', border: '1px solid #E5E8EB',
+            borderRadius: 8, outline: 'none', color: '#191F28',
+            fontFamily: 'inherit',
+          }}
+        />
+        <button
+          onClick={handleQuickAdd}
+          disabled={!quickInput.trim()}
+          style={{
+            fontSize: 13, fontWeight: 600, padding: '0 14px',
+            background: quickInput.trim() ? '#3182F6' : '#E5E8EB',
+            color: quickInput.trim() ? '#FFFFFF' : '#8B95A1',
+            border: 'none', borderRadius: 8,
+            cursor: quickInput.trim() ? 'pointer' : 'not-allowed',
+          }}
+        >추가</button>
+      </div>
 
       {/* ═══ 오늘 할 것 ═══ */}
       <div style={{ marginTop: 8 }}>
