@@ -1086,7 +1086,12 @@ function DashboardView({
                         onClick={(e) => { e.stopPropagation(); onMarkDone(t.id); }}
                         style={{ width: 18, height: 18, borderRadius: '50%', border: '2px solid #D5CCC0', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
                       />
-                      <span style={{ fontSize: 14, flex: 1, lineHeight: 1.5, color: '#1A1613' }}>{t.title}</span>
+                      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <span style={{ fontSize: 14, lineHeight: 1.4, color: '#1A1613' }}>{t.title}</span>
+                        {t.project && (
+                          <span style={{ fontSize: 11, color: '#AAA49C', fontWeight: 500 }}>{t.project}</span>
+                        )}
+                      </div>
                       {t.deadline && (
                         <span style={{ fontSize: 12, color: isOverdue ? '#B84848' : '#B5AFA6', whiteSpace: 'nowrap' }}>
                           {fD(t.deadline)}
@@ -1121,7 +1126,6 @@ function DashboardView({
                 minHeight: 56,
               }}
             >
-              <span style={{ fontSize: 22, lineHeight: 1 }}>{track.emoji}</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                   <span style={{ fontSize: 15, fontWeight: 600, color: '#1A1613' }}>{track.name}</span>
@@ -1907,6 +1911,7 @@ const S: Record<string, React.CSSProperties> = {
     fontWeight: 400, color: '#1A1613', maxWidth: 800, margin: '0 auto',
     display: 'flex', flexDirection: 'column', gap: 12,
     paddingBottom: 80, fontSize: 14, lineHeight: 1.5,
+    fontVariantNumeric: 'tabular-nums',
   },
   // Header
   header: {
