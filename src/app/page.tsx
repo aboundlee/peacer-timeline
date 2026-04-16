@@ -664,7 +664,7 @@ export default function App() {
         <div style={{ ...S.filterBar, padding: '0 0 8px', margin: 0 }}>
           <div style={S.filters}>
             <select value={fCat} onChange={(e) => setFCat(e.target.value)} style={S.sel}>
-              <option value="all">전체 카테고리</option>
+              <option value="all">전체 태그</option>
               {CATS.map((c) => <option key={c}>{c}</option>)}
             </select>
             <select value={fOwn} onChange={(e) => setFOwn(e.target.value)} style={S.sel}>
@@ -1032,8 +1032,30 @@ function DashboardView({
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
+    // ── Orphan projects: tasks whose project value doesn't match any phase ──
+    // Group them by project name, infer track by category, render as extra phases.
+    const knownProjectSet = new Set(mergedTracks.flatMap(t => t.phases.flatMap(p => p.projects)));
+    const categoryToTrack: Record<string, string> = {
+      '제조': '제품', '디자인': '제품',
+      '사업자/인허가': '운영', '계약': '운영',
+      '마케팅': '마케팅',
+    };
+    const orphanByTrack: Record<string, Record<string, AppTask[]>> = {};
+    tasks.forEach(t => {
+      const proj = t.project;
+      if (!proj || knownProjectSet.has(proj)) return;
+      const track = categoryToTrack[t.category];
+      if (!track) return; // truly uncategorized → stays in 기타 bucket
+      if (!orphanByTrack[track]) orphanByTrack[track] = {};
+      if (!orphanByTrack[track][proj]) orphanByTrack[track][proj] = [];
+      orphanByTrack[track][proj].push(t);
+    });
+
     const trackData: TrackData[] = mergedTracks.map(track => {
-      const phases = track.phases
+      const orphanPhases: Phase[] = Object.keys(orphanByTrack[track.name] || {})
+        .map(projName => ({ name: projName, projects: [projName] }));
+      const allPhases = [...track.phases, ...orphanPhases];
+      const phases = allPhases
         .map(getPhaseStatus)
         .filter(p => p.total > 0);
       const done = phases.reduce((s, p) => s + p.done, 0);
@@ -1048,11 +1070,14 @@ function DashboardView({
       return { name: track.name, emoji: track.emoji, goal: track.goal, target: track.target || null, done, total, phases, hasOverdue, weeklyDone };
     });
 
-    // Uncategorized tasks (not in any track's phases)
+    // Uncategorized tasks (not in any track's phases AND not an orphan placed under a track)
     const trackedProjects = new Set(mergedTracks.flatMap(t => t.phases.flatMap(p => p.projects)));
+    const orphanPlacedProjects = new Set(
+      Object.values(orphanByTrack).flatMap(byProj => Object.keys(byProj))
+    );
     const uncatTasks = tasks.filter(t => {
       const p = t.project || '기타';
-      return !trackedProjects.has(p);
+      return !trackedProjects.has(p) && !orphanPlacedProjects.has(p);
     });
     const uncatDone = uncatTasks.filter(t => t.status === 'done').length;
 
@@ -1632,7 +1657,7 @@ function DashboardView({
                   onClick={(e) => {
                     e.stopPropagation();
                     const trackCategory: Record<string, string> = { '제품': '제조', '운영': '사업자/인허가', '마케팅': '마케팅' };
-                    const name = window.prompt(`${track.name}에 새 프로젝트 이름을 입력하세요`);
+                    const name = window.prompt(`${track.name}에 새 마일스톤 이름을 입력하세요`);
                     if (!name || !name.trim()) return;
                     const phaseName = name.trim();
                     addExtraPhase(track.name, phaseName);
@@ -1652,7 +1677,7 @@ function DashboardView({
                   <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
                     <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
                   </svg>
-                  프로젝트 추가
+                  마일스톤 추가
                 </button>
               </div>
             )}
@@ -2346,13 +2371,13 @@ function Editor({
           <input value={f.title} onChange={(e) => s('title', e.target.value)} style={S.input} autoFocus />
           <div style={S.r2}>
             <div style={S.field}>
-              <label style={S.label}>카테고리</label>
+              <label style={S.label}>태그</label>
               <select value={f.category} onChange={(e) => s('category', e.target.value)} style={S.input}>
                 {CATS.map((c) => <option key={c}>{c}</option>)}
               </select>
             </div>
             <div style={S.field}>
-              <label style={S.label}>프로젝트</label>
+              <label style={S.label}>마일스톤</label>
               <select value={f.project} onChange={(e) => s('project', e.target.value)} style={S.input}>
                 <option value="">(없음)</option>
                 {projectsList.map((p) => <option key={p} value={p}>{p}</option>)}
