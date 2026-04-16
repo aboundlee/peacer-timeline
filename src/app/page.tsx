@@ -935,6 +935,28 @@ function DashboardView({
   const [openPhases, setOpenPhases] = useState<Set<string>>(new Set());
   const [extraPhases, setExtraPhases] = useState<Record<string, Phase[]>>({});
 
+  // Phase inline edit (double-click)
+  type PhaseMeta = { displayName?: string; priority?: string };
+  const [phaseMeta, setPhaseMeta] = useState<Record<string, PhaseMeta>>({});
+  const [editingPhaseKey, setEditingPhaseKey] = useState<string | null>(null);
+  const [editPhaseForm, setEditPhaseForm] = useState({ name: '', priority: 'medium' });
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('peacer-phase-meta');
+      if (raw) setPhaseMeta(JSON.parse(raw));
+    } catch {}
+  }, []);
+
+  const savePhaseEdit = (key: string) => {
+    setPhaseMeta(prev => {
+      const next = { ...prev, [key]: { displayName: editPhaseForm.name.trim() || undefined, priority: editPhaseForm.priority } };
+      try { localStorage.setItem('peacer-phase-meta', JSON.stringify(next)); } catch {}
+      return next;
+    });
+    setEditingPhaseKey(null);
+  };
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem('peacer-extra-phases');
@@ -1583,13 +1605,78 @@ function DashboardView({
             {isOpen && (
               <div style={{ borderTop: '1px solid #F2F4F6', padding: '4px 6px 6px' }}>
                 {track.phases.map(phase => {
-                  const phaseOpen = openPhases.has(`${track.name}/${phase.name}`);
+                  const phaseKey = `${track.name}/${phase.name}`;
+                  const phaseOpen = openPhases.has(phaseKey);
                   const phasePct = phase.total > 0 ? Math.round((phase.done / phase.total) * 100) : 0;
+                  const meta = phaseMeta[phaseKey];
+                  const displayName = meta?.displayName || phase.name;
+                  const priority = meta?.priority || 'medium';
+                  const priorityColors: Record<string, { bg: string; tx: string }> = {
+                    high: { bg: '#FEE2E2', tx: '#F04452' },
+                    medium: { bg: '#FFF7ED', tx: '#D97706' },
+                    low: { bg: '#F0FDF4', tx: '#22C55E' },
+                  };
+                  const priorityLabels: Record<string, string> = { high: '높음', medium: '중간', low: '낮음' };
+                  const isEditing = editingPhaseKey === phaseKey;
                   return (
                     <div key={phase.name} style={{ marginBottom: 2 }}>
-                      {/* Phase row */}
+                      {/* Phase row — double-click to edit */}
+                      {isEditing ? (
+                        <div
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 8,
+                            padding: '5px 12px', borderRadius: 6, background: '#FAF6EF',
+                            border: '1px solid #DDD3C2', minHeight: 28,
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            autoFocus
+                            value={editPhaseForm.name}
+                            onChange={(e) => setEditPhaseForm(f => ({ ...f, name: e.target.value }))}
+                            onKeyDown={(e) => { if (e.key === 'Enter') savePhaseEdit(phaseKey); if (e.key === 'Escape') setEditingPhaseKey(null); }}
+                            style={{
+                              flex: 1, fontSize: 13, fontWeight: 500, color: '#4E5968',
+                              background: 'transparent', border: 'none', outline: 'none', padding: 0,
+                            }}
+                            placeholder={phase.name}
+                          />
+                          <select
+                            value={editPhaseForm.priority}
+                            onChange={(e) => setEditPhaseForm(f => ({ ...f, priority: e.target.value }))}
+                            style={{
+                              fontSize: 11, fontWeight: 600, border: '1px solid #DDD3C2',
+                              borderRadius: 4, padding: '2px 4px', background: '#FFF',
+                              color: '#4E5968', cursor: 'pointer',
+                            }}
+                          >
+                            <option value="high">높음</option>
+                            <option value="medium">중간</option>
+                            <option value="low">낮음</option>
+                          </select>
+                          <button
+                            onClick={() => savePhaseEdit(phaseKey)}
+                            style={{
+                              fontSize: 11, fontWeight: 600, color: '#FFF', background: '#191F28',
+                              border: 'none', borderRadius: 4, padding: '3px 10px', cursor: 'pointer',
+                            }}
+                          >저장</button>
+                          <button
+                            onClick={() => setEditingPhaseKey(null)}
+                            style={{
+                              fontSize: 11, fontWeight: 500, color: '#8B95A1', background: 'transparent',
+                              border: '1px solid #D1D6DB', borderRadius: 4, padding: '3px 8px', cursor: 'pointer',
+                            }}
+                          >취소</button>
+                        </div>
+                      ) : (
                       <div
-                        onClick={() => togglePhase(`${track.name}/${phase.name}`)}
+                        onClick={() => togglePhase(phaseKey)}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          setEditPhaseForm({ name: displayName, priority });
+                          setEditingPhaseKey(phaseKey);
+                        }}
                         className="dash-row"
                         style={{
                           display: 'flex', alignItems: 'center', gap: 10,
@@ -1602,7 +1689,13 @@ function DashboardView({
                           background: signalColor(phase.status),
                           boxShadow: phase.status === 'overdue' ? '0 0 4px rgba(240,68,82,.4)' : 'none',
                         }} />
-                        <span style={{ fontSize: 13, fontWeight: 500, color: '#4E5968', flex: 1 }}>{phase.name}</span>
+                        <span style={{ fontSize: 13, fontWeight: 500, color: '#4E5968', flex: 1 }}>{displayName}</span>
+                        {priority !== 'medium' && (
+                          <span style={{
+                            fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4,
+                            background: priorityColors[priority]?.bg, color: priorityColors[priority]?.tx,
+                          }}>{priorityLabels[priority]}</span>
+                        )}
                         {phase.target && phase.status !== 'done' && (
                           <span style={{
                             fontSize: 11, fontWeight: 500,
@@ -1619,6 +1712,7 @@ function DashboardView({
                           <path d="M5.5 3.5L9 7l-3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
                         </svg>
                       </div>
+                      )}
 
                       {/* Phase expanded — show tasks + per-phase add-task button */}
                       {phaseOpen && (
