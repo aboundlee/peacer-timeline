@@ -98,13 +98,14 @@ export const PROJECT_META: Record<string, { goal: string; emoji: string; kr?: st
 
 // Legacy sub-project tags → current phase(project) name
 // Applied on DB load so old tasks migrate in-memory to the new flat model.
+// Maps old DB project values → current phase names
 export const LEGACY_PROJECT_MAP: Record<string, string> = {
-  "샘플링": "샘플 테스트",
-  "본생산": "본생산 준비",
-  "패키지 디자인": "본생산 준비",
-  "패키지": "발주/출하",
-  "발주": "발주/출하",
-  "3PL": "발주/출하",
+  "샘플 테스트": "샘플링",
+  "패키지 디자인": "본생산",
+  "본생산 준비": "본생산",
+  "패키지": "발주",
+  "발주/출하": "발주",
+  "3PL": "발주",
   "법인 설립": "법인/사업자",
   "리뷰 채널": "자체 채널",
   "프리오더 캠페인": "자체 채널",

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase, dbToApp, appToDb } from '@/lib/supabase';
-import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, PROJECT_META, TRACKS, CUSTOMER_GOAL, dU, fD, uid, type Phase } from '@/lib/constants';
+import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, PROJECT_META, TRACKS, CUSTOMER_GOAL, LEGACY_PROJECT_MAP, LEGACY_CAT_MAP, dU, fD, uid, type Phase } from '@/lib/constants';
 import { calcCriticalPath, AppTask } from '@/lib/criticalPath';
 
 // ═══════════════════════════════════════════════════
@@ -244,6 +244,31 @@ export default function App() {
     if (data) {
       setTasks(data.map(dbToApp));
       setLoaded(true);
+
+      // One-time DB migration: update legacy project + category values
+      if (!localStorage.getItem('peacer-db-migrated-v2')) {
+        const updates: Promise<unknown>[] = [];
+        for (const row of data) {
+          const patch: Record<string, string> = {};
+          if (row.project && LEGACY_PROJECT_MAP[row.project]) {
+            patch.project = LEGACY_PROJECT_MAP[row.project];
+          }
+          if (row.category && LEGACY_CAT_MAP[row.category]) {
+            patch.category = LEGACY_CAT_MAP[row.category];
+          }
+          if (Object.keys(patch).length > 0) {
+            updates.push(supabase.from('tasks').update(patch).eq('id', row.id));
+          }
+        }
+        if (updates.length > 0) {
+          Promise.all(updates).then(() => {
+            localStorage.setItem('peacer-db-migrated-v2', '1');
+            fetchTasks(); // reload with clean data
+          });
+        } else {
+          localStorage.setItem('peacer-db-migrated-v2', '1');
+        }
+      }
     }
   }, []);
 
