@@ -2304,7 +2304,19 @@ function Editor({
   onDelete?: () => void;
   allTasks: AppTask[];
 }) {
-  const projectsList = [...new Set(allTasks.map((t) => t.project).filter(Boolean))];
+  // Project options = all phase names from TRACKS + custom phases from localStorage + any project
+  // values that exist on current tasks (for backward compatibility with legacy values).
+  const phaseNames = TRACKS.flatMap((tr) => tr.phases.map((p) => p.name));
+  let extraFromStorage: string[] = [];
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem('peacer-extra-phases') : null;
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, { name: string }[]>;
+      extraFromStorage = Object.values(parsed).flatMap((list) => list.map((p) => p.name));
+    }
+  } catch { /* ignore */ }
+  const fromTasks = allTasks.map((t) => t.project).filter((v): v is string => !!v);
+  const projectsList = [...new Set([...phaseNames, ...extraFromStorage, ...fromTasks])];
   const iv = initialValues || {};
   const [f, setF] = useState({
     title: task?.title || iv.title || '',
@@ -2341,8 +2353,10 @@ function Editor({
             </div>
             <div style={S.field}>
               <label style={S.label}>프로젝트</label>
-              <input list="proj-list" value={f.project} onChange={(e) => s('project', e.target.value)} style={S.input} placeholder="예: 샘플링" />
-              <datalist id="proj-list">{projectsList.map((p) => <option key={p!} value={p!} />)}</datalist>
+              <select value={f.project} onChange={(e) => s('project', e.target.value)} style={S.input}>
+                <option value="">(없음)</option>
+                {projectsList.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
             </div>
           </div>
           <div style={S.r2}>
