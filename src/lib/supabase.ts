@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { LEGACY_CAT_MAP } from './constants';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -27,7 +28,7 @@ export function dbToApp(row: any) {
   return {
     id: row.id as string,
     title: row.title as string,
-    category: row.category as string,
+    category: (LEGACY_CAT_MAP[row.category] || row.category) as string,
     project: (row.project || null) as string | null,
     owner: row.owner as string,
     deadline: (row.deadline || null) as string | null,
