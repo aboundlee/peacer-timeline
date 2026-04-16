@@ -247,27 +247,24 @@ export default function App() {
 
       // One-time DB migration: update legacy project + category values
       if (!localStorage.getItem('peacer-db-migrated-v2')) {
-        const updates: Promise<unknown>[] = [];
-        for (const row of data) {
-          const patch: Record<string, string> = {};
-          if (row.project && LEGACY_PROJECT_MAP[row.project]) {
-            patch.project = LEGACY_PROJECT_MAP[row.project];
+        (async () => {
+          let migrated = false;
+          for (const row of data) {
+            const patch: Record<string, string> = {};
+            if (row.project && LEGACY_PROJECT_MAP[row.project]) {
+              patch.project = LEGACY_PROJECT_MAP[row.project];
+            }
+            if (row.category && LEGACY_CAT_MAP[row.category]) {
+              patch.category = LEGACY_CAT_MAP[row.category];
+            }
+            if (Object.keys(patch).length > 0) {
+              await supabase.from('tasks').update(patch).eq('id', row.id);
+              migrated = true;
+            }
           }
-          if (row.category && LEGACY_CAT_MAP[row.category]) {
-            patch.category = LEGACY_CAT_MAP[row.category];
-          }
-          if (Object.keys(patch).length > 0) {
-            updates.push(supabase.from('tasks').update(patch).eq('id', row.id));
-          }
-        }
-        if (updates.length > 0) {
-          Promise.all(updates).then(() => {
-            localStorage.setItem('peacer-db-migrated-v2', '1');
-            fetchTasks(); // reload with clean data
-          });
-        } else {
           localStorage.setItem('peacer-db-migrated-v2', '1');
-        }
+          if (migrated) fetchTasks();
+        })();
       }
     }
   }, []);
