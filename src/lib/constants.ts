@@ -1,12 +1,18 @@
-export const CATS = ["제조", "사업자/인허가", "마케팅", "디자인", "계약", "기타"];
+export const CATS = ["제품", "운영", "마케팅", "기타"];
 
 export const CC: Record<string, { bg: string; bd: string; tx: string }> = {
-  "제조": { bg: "#EFEBFA", bd: "#A896C4", tx: "#3A2E5A" },
-  "사업자/인허가": { bg: "#E4EFF5", bd: "#7A9AAD", tx: "#2E3E5A" },
+  "제품": { bg: "#EFEBFA", bd: "#A896C4", tx: "#3A2E5A" },
+  "운영": { bg: "#E4EFF5", bd: "#7A9AAD", tx: "#2E3E5A" },
   "마케팅": { bg: "#FAF0F0", bd: "#C49696", tx: "#5A2E2E" },
-  "디자인": { bg: "#F5EEE6", bd: "#C4A896", tx: "#5A3E2E" },
-  "계약": { bg: "#EBF3E6", bd: "#A8C496", tx: "#3E5A2E" },
   "기타": { bg: "#F5F1EA", bd: "#DDD3C2", tx: "#4A3F38" },
+};
+
+// Normalize legacy category values → current 4 categories
+export const LEGACY_CAT_MAP: Record<string, string> = {
+  "제조": "제품",
+  "디자인": "제품",
+  "사업자/인허가": "운영",
+  "계약": "운영",
 };
 
 export const STS = ["todo", "doing", "waiting", "done"] as const;
@@ -56,9 +62,9 @@ export const TRACKS: Track[] = [
   {
     name: "제품", emoji: "🧴", goal: "출시일 맞추기", target: "2026-05-19",
     phases: [
-      { name: "샘플 테스트", projects: ["샘플 테스트"], target: "2026-04-21" },
-      { name: "본생산 준비", projects: ["본생산 준비"], target: "2026-05-02" },
-      { name: "발주/출하", projects: ["발주/출하"], target: "2026-05-19" },
+      { name: "샘플링", projects: ["샘플링", "샘플 테스트"], target: "2026-04-21" },
+      { name: "본생산", projects: ["본생산", "본생산 준비"], target: "2026-05-02" },
+      { name: "발주", projects: ["발주", "발주/출하"], target: "2026-05-19" },
     ],
   },
   {
@@ -80,9 +86,9 @@ export const TRACKS: Track[] = [
 
 // Project metadata — goals, deadlines, KR mapping (project = phase name)
 export const PROJECT_META: Record<string, { goal: string; emoji: string; kr?: string }> = {
-  "샘플 테스트": { goal: "제품 확정", emoji: "🧪", kr: "고객 경험 100% 구현된 제품 런칭" },
-  "본생산 준비": { goal: "본생산·패키지 디자인 확정", emoji: "🏭", kr: "고객 경험 100% 구현된 제품 런칭" },
-  "발주/출하": { goal: "패키지 입고·3PL 발주", emoji: "📦", kr: "고객 경험 100% 구현된 제품 런칭" },
+  "샘플링": { goal: "제품 확정", emoji: "🧪", kr: "고객 경험 100% 구현된 제품 런칭" },
+  "본생산": { goal: "본생산·패키지 디자인 확정", emoji: "🏭", kr: "고객 경험 100% 구현된 제품 런칭" },
+  "발주": { goal: "패키지 입고·3PL 발주", emoji: "📦", kr: "고객 경험 100% 구현된 제품 런칭" },
   "법인/사업자": { goal: "법인+계좌+인증서", emoji: "🏢" },
   "인허가": { goal: "화장품 책임판매업", emoji: "📋" },
   "판매 인프라": { goal: "판매 인프라 구축", emoji: "🛒" },

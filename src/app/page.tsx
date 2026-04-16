@@ -664,7 +664,7 @@ export default function App() {
         <div style={{ ...S.filterBar, padding: '0 0 8px', margin: 0 }}>
           <div style={S.filters}>
             <select value={fCat} onChange={(e) => setFCat(e.target.value)} style={S.sel}>
-              <option value="all">전체 태그</option>
+              <option value="all">전체 분류</option>
               {CATS.map((c) => <option key={c}>{c}</option>)}
             </select>
             <select value={fOwn} onChange={(e) => setFOwn(e.target.value)} style={S.sel}>
@@ -1036,9 +1036,10 @@ function DashboardView({
     // Group them by project name, infer track by category, render as extra phases.
     const knownProjectSet = new Set(mergedTracks.flatMap(t => t.phases.flatMap(p => p.projects)));
     const categoryToTrack: Record<string, string> = {
+      '제품': '제품', '운영': '운영', '마케팅': '마케팅',
+      // Legacy categories (in case normalization missed)
       '제조': '제품', '디자인': '제품',
       '사업자/인허가': '운영', '계약': '운영',
-      '마케팅': '마케팅',
     };
     const orphanByTrack: Record<string, Record<string, AppTask[]>> = {};
     tasks.forEach(t => {
@@ -1626,7 +1627,7 @@ function DashboardView({
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              const trackCategory: Record<string, string> = { '제품': '제조', '운영': '사업자/인허가', '마케팅': '마케팅' };
+                              const trackCategory: Record<string, string> = { '제품': '제품', '운영': '운영', '마케팅': '마케팅' };
                               const phaseMeta = TRACKS.find(tr => tr.name === track.name)?.phases.find(p => p.name === phase.name);
                               onAddNew({
                                 category: trackCategory[track.name] || '기타',
@@ -1656,8 +1657,8 @@ function DashboardView({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    const trackCategory: Record<string, string> = { '제품': '제조', '운영': '사업자/인허가', '마케팅': '마케팅' };
-                    const name = window.prompt(`${track.name}에 새 마일스톤 이름을 입력하세요`);
+                    const trackCategory: Record<string, string> = { '제품': '제품', '운영': '운영', '마케팅': '마케팅' };
+                    const name = window.prompt(`${track.name}에 새 프로젝트 이름을 입력하세요`);
                     if (!name || !name.trim()) return;
                     const phaseName = name.trim();
                     addExtraPhase(track.name, phaseName);
@@ -1677,7 +1678,7 @@ function DashboardView({
                   <svg width="10" height="10" viewBox="0 0 12 12" fill="none">
                     <path d="M6 2v8M2 6h8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
                   </svg>
-                  마일스톤 추가
+                  프로젝트 추가
                 </button>
               </div>
             )}
@@ -2371,13 +2372,13 @@ function Editor({
           <input value={f.title} onChange={(e) => s('title', e.target.value)} style={S.input} autoFocus />
           <div style={S.r2}>
             <div style={S.field}>
-              <label style={S.label}>태그</label>
+              <label style={S.label}>분류</label>
               <select value={f.category} onChange={(e) => s('category', e.target.value)} style={S.input}>
                 {CATS.map((c) => <option key={c}>{c}</option>)}
               </select>
             </div>
             <div style={S.field}>
-              <label style={S.label}>마일스톤</label>
+              <label style={S.label}>프로젝트</label>
               <select value={f.project} onChange={(e) => s('project', e.target.value)} style={S.input}>
                 <option value="">(없음)</option>
                 {projectsList.map((p) => <option key={p} value={p}>{p}</option>)}
