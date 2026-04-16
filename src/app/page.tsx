@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase, dbToApp, appToDb } from '@/lib/supabase';
 import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, PROJECT_META, TRACKS, CUSTOMER_GOAL, LEGACY_PROJECT_MAP, LEGACY_CAT_MAP, dU, fD, uid, type Phase } from '@/lib/constants';
+import DependencyGraph from './DependencyGraph';
 import { calcCriticalPath, AppTask } from '@/lib/criticalPath';
 
 // ═══════════════════════════════════════════════════
@@ -674,6 +675,16 @@ export default function App() {
         onToggle={() => toggleCollapse('weekly')}
       >
         <WeeklyGrid tasks={tasks} onEdit={setEditId} onDateChange={handleDateChange} />
+      </CollapsibleSection>
+
+      {/* ─── SECTION: 의존성 그래프 ─── */}
+      <CollapsibleSection
+        title="의존성 그래프"
+        sectionKey="depGraph"
+        collapsed={!!collapsed.depGraph}
+        onToggle={() => toggleCollapse('depGraph')}
+      >
+        <DependencyGraph tasks={tasks} />
       </CollapsibleSection>
 
       {/* ─── SECTION: 전체 보기 (칸반) — done tasks hidden ─── */}
