@@ -170,12 +170,9 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
   // Critical path (computed on all tasks, not just visible)
   const criticalSet = useMemo(() => findCriticalPath(tasks, shipDate), [tasks]);
 
-  // Card positions
-  const { positions, laneYOffsets, totalHeight, totalWidth } = useMemo(() => {
-    const positions: Record<string, { x: number; y: number; laneIdx: number }> = {};
-    const laneYOffsets: number[] = [];
-    let currentY = HEADER_H + 4;
-
+  // Card X positions: dependency-aware (always left→right flow)
+  // Step 1: compute raw X from deadline, then push right if any dependency is further right
+  const taskXPositions = useMemo(() => {
     const dateToX = (d: string | null): number => {
       if (!d) return (dates.length - 1) * dayW;
       const idx = dates.indexOf(d);
@@ -184,20 +181,82 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
       return (dates.length - 1) * dayW;
     };
 
+    const byId: Record<string, AppTask> = {};
+    relevantTasks.forEach(t => { byId[t.id] = t; });
+
+    // Raw X from deadline
+    const rawX: Record<string, number> = {};
+    relevantTasks.forEach(t => {
+      rawX[t.id] = dateToX(t.deadline);
+    });
+
+    // Topological pass: ensure task is always to the right of all its dependencies
+    const MIN_GAP = CARD_W + 16; // minimum horizontal gap between dependent cards
+    const resolved = new Set<string>();
+    const resolvedX: Record<string, number> = {};
+
+    function resolveX(id: string, visited: Set<string>): number {
+      if (resolvedX[id] !== undefined) return resolvedX[id];
+      if (visited.has(id)) return rawX[id] || 0; // cycle guard
+      visited.add(id);
+
+      const t = byId[id];
+      if (!t) { resolvedX[id] = rawX[id] || 0; return resolvedX[id]; }
+
+      let x = rawX[id] ?? 0;
+      const deps = (t.dependsOn || []).filter(d => byId[d]);
+      for (const depId of deps) {
+        const depX = resolveX(depId, visited);
+        // This task must be at least MIN_GAP to the right of its dependency
+        x = Math.max(x, depX + MIN_GAP);
+      }
+
+      resolvedX[id] = x;
+      resolved.add(id);
+      return x;
+    }
+
+    relevantTasks.forEach(t => resolveX(t.id, new Set()));
+
+    return { resolvedX, rawX, dateToX };
+  }, [relevantTasks, dates, dayW]);
+
+  // Track which tasks got pushed (deadline conflict visual indicator)
+  const pushedTasks = useMemo(() => {
+    const pushed = new Set<string>();
+    relevantTasks.forEach(t => {
+      const raw = taskXPositions.rawX[t.id];
+      const resolved = taskXPositions.resolvedX[t.id];
+      if (resolved !== undefined && raw !== undefined && resolved > raw + 8) {
+        pushed.add(t.id);
+      }
+    });
+    return pushed;
+  }, [relevantTasks, taskXPositions]);
+
+  // Card positions: use resolved X, stack within lanes
+  const { positions, laneYOffsets, totalHeight, totalWidth } = useMemo(() => {
+    const positions: Record<string, { x: number; y: number; laneIdx: number }> = {};
+    const laneYOffsets: number[] = [];
+    let currentY = HEADER_H + 4;
+    let maxX = 0;
+
     for (let li = 0; li < laneData.length; li++) {
       const lane = laneData[li];
       laneYOffsets.push(currentY);
 
+      // Sort by resolved X position (left to right)
       const sorted = [...lane.tasks].sort((a, b) => {
-        const da = a.deadline || '9999-12-31';
-        const db = b.deadline || '9999-12-31';
-        if (da !== db) return da < db ? -1 : 1;
+        const xa = taskXPositions.resolvedX[a.id] ?? 0;
+        const xb = taskXPositions.resolvedX[b.id] ?? 0;
+        if (xa !== xb) return xa - xb;
         return a.id < b.id ? -1 : 1;
       });
 
       const placed: { x: number; y: number; right: number }[] = [];
       for (const t of sorted) {
-        const x = dateToX(t.deadline) - CARD_W / 2;
+        const centerX = taskXPositions.resolvedX[t.id] ?? 0;
+        const x = centerX - CARD_W / 2;
         let row = 0;
         while (true) {
           const y = LANE_PAD_TOP + row * (CARD_H + CARD_GAP_Y);
@@ -205,8 +264,10 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
             p.y === y && !(x >= p.right + 8 || x + CARD_W + 8 <= p.x)
           );
           if (!overlap) {
-            placed.push({ x, y, right: x + CARD_W });
-            positions[t.id] = { x: Math.max(0, x), y: currentY + LANE_PAD_TOP + row * (CARD_H + CARD_GAP_Y), laneIdx: li };
+            const finalX = Math.max(0, x);
+            placed.push({ x: finalX, y, right: finalX + CARD_W });
+            positions[t.id] = { x: finalX, y: currentY + LANE_PAD_TOP + row * (CARD_H + CARD_GAP_Y), laneIdx: li };
+            maxX = Math.max(maxX, finalX + CARD_W);
             break;
           }
           row++;
@@ -220,13 +281,14 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
       currentY += LANE_PAD_TOP + maxRows * (CARD_H + CARD_GAP_Y) + LANE_PAD_BOT;
     }
 
+    const dateWidth = LANE_LABEL_W + dates.length * dayW + 20;
     return {
       positions,
       laneYOffsets,
       totalHeight: currentY + 20,
-      totalWidth: LANE_LABEL_W + dates.length * dayW + 20,
+      totalWidth: Math.max(dateWidth, LANE_LABEL_W + maxX + 40),
     };
-  }, [laneData, dates, dayW]);
+  }, [laneData, dates, dayW, taskXPositions]);
 
   // Scroll to today on mount
   useEffect(() => {
@@ -485,6 +547,7 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
             if (!pos) return null;
             const sc = statusColor(t.status);
             const isCritical = criticalSet.has(t.id);
+            const isPushed = pushedTasks.has(t.id);
             const isSelected = selectedId === t.id;
             const isHovered = hoveredId === t.id;
             const isFaded = hasFocus && !connectedToFocus.has(t.id);
@@ -564,9 +627,9 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
                   {t.deadline && (
                     <span style={{
                       fontSize: 10, fontWeight: 600,
-                      color: isCritical ? '#B84848' : dU(t.deadline) < 0 ? '#B84848' : '#8A7D72',
-                    }}>
-                      {fD(t.deadline)}
+                      color: isPushed ? '#B84848' : isCritical ? '#B84848' : dU(t.deadline) < 0 ? '#B84848' : '#8A7D72',
+                    }} title={isPushed ? '선행 태스크 때문에 일정 역전됨' : ''}>
+                      {isPushed && '⚠ '}{fD(t.deadline)}
                     </span>
                   )}
                 </div>
