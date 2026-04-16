@@ -56,15 +56,15 @@ export const TRACKS: Track[] = [
   {
     name: "제품", emoji: "🧴", goal: "출시일 맞추기", target: "2026-05-19",
     phases: [
-      { name: "샘플 테스트", projects: ["샘플 테스트", "샘플링"], target: "2026-04-21" },
-      { name: "본생산 준비", projects: ["본생산 준비", "본생산", "패키지 디자인"], target: "2026-05-02" },
-      { name: "발주/출하", projects: ["발주/출하", "패키지", "발주", "3PL"], target: "2026-05-19" },
+      { name: "샘플 테스트", projects: ["샘플 테스트"], target: "2026-04-21" },
+      { name: "본생산 준비", projects: ["본생산 준비"], target: "2026-05-02" },
+      { name: "발주/출하", projects: ["발주/출하"], target: "2026-05-19" },
     ],
   },
   {
     name: "운영", emoji: "🏢", goal: "온라인 판매 인프라 완성", target: "2026-05-12",
     phases: [
-      { name: "법인/사업자", projects: ["법인/사업자", "법인 설립"], target: "2026-04-18" },
+      { name: "법인/사업자", projects: ["법인/사업자"], target: "2026-04-18" },
       { name: "인허가", projects: ["인허가"], target: "2026-04-25" },
       { name: "판매 인프라", projects: ["판매 인프라"], target: "2026-05-12" },
     ],
@@ -72,23 +72,37 @@ export const TRACKS: Track[] = [
   {
     name: "마케팅", emoji: "📣", goal: "출시 전 고객 100명", target: "2026-05-19",
     phases: [
-      { name: "자체 채널", projects: ["자체 채널", "리뷰 채널", "프리오더 캠페인"], target: "2026-05-05" },
-      { name: "씨딩", projects: ["씨딩", "인플루언서 씨딩"], target: "2026-04-28" },
+      { name: "자체 채널", projects: ["자체 채널"], target: "2026-05-05" },
+      { name: "씨딩", projects: ["씨딩"], target: "2026-04-28" },
     ],
   },
 ];
 
-// Project metadata — goals, deadlines, KR mapping (kept for backward compat)
+// Project metadata — goals, deadlines, KR mapping (project = phase name)
 export const PROJECT_META: Record<string, { goal: string; emoji: string; kr?: string }> = {
-  "샘플링": { goal: "제품 확정", emoji: "🧪", kr: "고객 경험 100% 구현된 제품 런칭" },
-  "본생산": { goal: "본생산 완료", emoji: "🏭", kr: "고객 경험 100% 구현된 제품 런칭" },
-  "법인 설립": { goal: "법인+계좌+인증서", emoji: "🏢" },
+  "샘플 테스트": { goal: "제품 확정", emoji: "🧪", kr: "고객 경험 100% 구현된 제품 런칭" },
+  "본생산 준비": { goal: "본생산·패키지 디자인 확정", emoji: "🏭", kr: "고객 경험 100% 구현된 제품 런칭" },
+  "발주/출하": { goal: "패키지 입고·3PL 발주", emoji: "📦", kr: "고객 경험 100% 구현된 제품 런칭" },
+  "법인/사업자": { goal: "법인+계좌+인증서", emoji: "🏢" },
   "인허가": { goal: "화장품 책임판매업", emoji: "📋" },
-  "패키지": { goal: "패키지 입고", emoji: "📦", kr: "고객 경험 100% 구현된 제품 런칭" },
-  "패키지 디자인": { goal: "전성분표 디자인 확정", emoji: "🎨", kr: "고객 경험 100% 구현된 제품 런칭" },
-  "프리오더 캠페인": { goal: "사전 예약 100명", emoji: "🚀", kr: "초기 결제 고객 100명" },
-  "인플루언서 씨딩": { goal: "인플루언서 10명 씨딩", emoji: "📣", kr: "초기 결제 고객 100명" },
-  "리뷰 채널": { goal: "팔로우 100명 (오가닉)", emoji: "📱", kr: "NPS 달성 → 리뷰 20건" },
+  "판매 인프라": { goal: "판매 인프라 구축", emoji: "🛒" },
+  "자체 채널": { goal: "리뷰 100 + 사전 예약 100", emoji: "📱", kr: "초기 결제 고객 100명" },
+  "씨딩": { goal: "인플루언서 10명 씨딩", emoji: "📣", kr: "초기 결제 고객 100명" },
+};
+
+// Legacy sub-project tags → current phase(project) name
+// Applied on DB load so old tasks migrate in-memory to the new flat model.
+export const LEGACY_PROJECT_MAP: Record<string, string> = {
+  "샘플링": "샘플 테스트",
+  "본생산": "본생산 준비",
+  "패키지 디자인": "본생산 준비",
+  "패키지": "발주/출하",
+  "발주": "발주/출하",
+  "3PL": "발주/출하",
+  "법인 설립": "법인/사업자",
+  "리뷰 채널": "자체 채널",
+  "프리오더 캠페인": "자체 채널",
+  "인플루언서 씨딩": "씨딩",
 };
 
 // Utility functions
