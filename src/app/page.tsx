@@ -956,6 +956,8 @@ function DashboardView({
   const [openTracks, setOpenTracks] = useState<Set<string>>(() => new Set(['제품', '운영', '마케팅']));
   const [openPhases, setOpenPhases] = useState<Set<string>>(new Set());
   const [extraPhases, setExtraPhases] = useState<Record<string, Phase[]>>({});
+  const [archivedPhases, setArchivedPhases] = useState<Set<string>>(new Set());
+  const [showDonePhases, setShowDonePhases] = useState<Record<string, boolean>>({});
 
   // Phase inline edit (double-click) — name only
   type PhaseMeta = { displayName?: string };
@@ -991,6 +993,32 @@ function DashboardView({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [editingPhaseKey]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('peacer-archived-phases');
+      if (raw) setArchivedPhases(new Set(JSON.parse(raw)));
+    } catch {}
+  }, []);
+
+  const archivePhase = (phaseKey: string) => {
+    setArchivedPhases(prev => {
+      const next = new Set(prev);
+      next.add(phaseKey);
+      try { localStorage.setItem('peacer-archived-phases', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+    setEditingPhaseKey(null);
+  };
+
+  const unarchivePhase = (phaseKey: string) => {
+    setArchivedPhases(prev => {
+      const next = new Set(prev);
+      next.delete(phaseKey);
+      try { localStorage.setItem('peacer-archived-phases', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  };
 
   useEffect(() => {
     try {
@@ -1115,7 +1143,13 @@ function DashboardView({
       const allPhases = [...track.phases, ...orphanPhases];
       const phases = allPhases
         .map(getPhaseStatus)
-        .filter(p => p.total > 0);
+        .filter(p => p.total > 0)
+        // Sort by target date ascending (no target = end)
+        .sort((a, b) => {
+          const da = a.target ? new Date(a.target).getTime() : Infinity;
+          const db = b.target ? new Date(b.target).getTime() : Infinity;
+          return da - db;
+        });
       const done = phases.reduce((s, p) => s + p.done, 0);
       const total = phases.reduce((s, p) => s + p.total, 0);
       const hasOverdue = phases.some(p => p.status === 'overdue');
@@ -1637,17 +1671,28 @@ function DashboardView({
             </div>
 
             {/* Track expanded — show phases with signal lights */}
-            {isOpen && (
-              <div style={{ borderTop: '1px solid #F2F4F6', padding: '4px 6px 6px' }}>
-                {track.phases.map(phase => {
+            {isOpen && (() => {
+              const activePhases = track.phases.filter(p => {
+                const pk = `${track.name}/${p.name}`;
+                return p.status !== 'done' && !archivedPhases.has(pk);
+              });
+              const donePhases = track.phases.filter(p => {
+                const pk = `${track.name}/${p.name}`;
+                return p.status === 'done' || archivedPhases.has(pk);
+              });
+              const showDone = showDonePhases[track.name] || false;
+
+              const renderPhaseRow = (phase: typeof track.phases[0]) => {
                   const phaseKey = `${track.name}/${phase.name}`;
                   const phaseOpen = openPhases.has(phaseKey);
                   const phasePct = phase.total > 0 ? Math.round((phase.done / phase.total) * 100) : 0;
                   const meta = phaseMeta[phaseKey];
                   const displayName = meta?.displayName || phase.name;
                   const isEditing = editingPhaseKey === phaseKey;
+                  const isArchived = archivedPhases.has(phaseKey);
+                  const isDone = phase.status === 'done' || isArchived;
                   return (
-                    <div key={phase.name} style={{ marginBottom: 2 }}>
+                    <div key={phase.name} style={{ marginBottom: 2, opacity: isDone ? 0.6 : 1 }}>
                       {/* Phase row — double-click to edit name */}
                       {isEditing ? (
                         <div
@@ -1677,6 +1722,23 @@ function DashboardView({
                               border: 'none', borderRadius: 4, padding: '3px 10px', cursor: 'pointer',
                             }}
                           >저장</button>
+                          {isArchived ? (
+                            <button
+                              onClick={() => unarchivePhase(phaseKey)}
+                              style={{
+                                fontSize: 11, fontWeight: 600, color: '#3182F6', background: '#EBF3FE',
+                                border: '1px solid #B8D4F8', borderRadius: 4, padding: '3px 10px', cursor: 'pointer',
+                              }}
+                            >복원</button>
+                          ) : (
+                            <button
+                              onClick={() => archivePhase(phaseKey)}
+                              style={{
+                                fontSize: 11, fontWeight: 600, color: '#8B95A1', background: '#F2F4F6',
+                                border: '1px solid #E5E8EB', borderRadius: 4, padding: '3px 10px', cursor: 'pointer',
+                              }}
+                            >아카이브</button>
+                          )}
                         </div>
                       ) : (
                       <div
@@ -1698,8 +1760,15 @@ function DashboardView({
                           background: signalColor(phase.status),
                           boxShadow: phase.status === 'overdue' ? '0 0 4px rgba(240,68,82,.4)' : 'none',
                         }} />
-                        <span style={{ fontSize: 13, fontWeight: 500, color: '#4E5968', flex: 1 }}>{displayName}</span>
-                        {phase.target && phase.status !== 'done' && (
+                        <span style={{
+                          fontSize: 13, fontWeight: 500, flex: 1,
+                          color: isDone ? '#8B95A1' : '#4E5968',
+                          textDecoration: isDone ? 'line-through' : 'none',
+                        }}>{displayName}</span>
+                        {isDone && (
+                          <span style={{ fontSize: 10, fontWeight: 500, color: '#A8C496', background: '#EBF3E6', borderRadius: 3, padding: '1px 6px' }}>완료</span>
+                        )}
+                        {phase.target && !isDone && (
                           <span style={{
                             fontSize: 11, fontWeight: 500,
                             color: dU(phase.target) < 0 ? '#F04452' : '#8B95A1',
@@ -1749,7 +1818,39 @@ function DashboardView({
                       )}
                     </div>
                   );
-                })}
+              };
+
+              return (
+              <div style={{ borderTop: '1px solid #F2F4F6', padding: '4px 6px 6px' }}>
+                {activePhases.map(renderPhaseRow)}
+
+                {/* Completed / archived projects — collapsed by default */}
+                {donePhases.length > 0 && (
+                  <div style={{ marginTop: 4 }}>
+                    <div
+                      onClick={() => setShowDonePhases(prev => ({ ...prev, [track.name]: !prev[track.name] }))}
+                      className="dash-row"
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        padding: '4px 12px', cursor: 'pointer', borderRadius: 6,
+                        minHeight: 24,
+                      }}
+                    >
+                      <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>
+                        완료된 프로젝트 {donePhases.length}개
+                      </span>
+                      <svg width="10" height="10" viewBox="0 0 14 14" fill="none" style={{
+                        color: '#8B95A1',
+                        transform: showDone ? 'rotate(90deg)' : 'rotate(0deg)',
+                        transition: 'transform .2s ease', flexShrink: 0,
+                      }}>
+                        <path d="M5.5 3.5L9 7l-3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </div>
+                    {showDone && donePhases.map(renderPhaseRow)}
+                  </div>
+                )}
+
                 {/* Add new project (phase-level) — opens editor with new project name preset */}
                 <button
                   onClick={(e) => {
@@ -1778,7 +1879,8 @@ function DashboardView({
                   프로젝트 추가
                 </button>
               </div>
-            )}
+              );
+            })()}
           </div>
         );
       })}
