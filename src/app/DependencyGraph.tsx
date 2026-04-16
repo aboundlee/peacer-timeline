@@ -170,32 +170,6 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
   // Critical path (computed on all tasks, not just visible)
   const criticalSet = useMemo(() => findCriticalPath(tasks, shipDate), [tasks]);
 
-  // Hover-connected task IDs
-  const connectedToHover = useMemo(() => {
-    if (!hoveredId) return new Set<string>();
-    const ids = new Set<string>([hoveredId]);
-    // Upstream (what this task depends on)
-    const addUpstream = (id: string) => {
-      const t = tasks.find(x => x.id === id);
-      if (!t) return;
-      (t.dependsOn || []).forEach(depId => {
-        if (!ids.has(depId)) { ids.add(depId); addUpstream(depId); }
-      });
-    };
-    // Downstream (what depends on this task)
-    const addDownstream = (id: string) => {
-      tasks.forEach(t => {
-        if ((t.dependsOn || []).includes(id) && !ids.has(t.id)) {
-          ids.add(t.id);
-          addDownstream(t.id);
-        }
-      });
-    };
-    addUpstream(hoveredId);
-    addDownstream(hoveredId);
-    return ids;
-  }, [hoveredId, tasks]);
-
   // Card positions
   const { positions, laneYOffsets, totalHeight, totalWidth } = useMemo(() => {
     const positions: Record<string, { x: number; y: number; laneIdx: number }> = {};
@@ -293,12 +267,38 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
   }, [relevantTasks, positions, criticalSet]);
 
   const selectedTask = selectedId ? byId[selectedId] : null;
-  const hasHover = hoveredId !== null;
 
-  // Is this edge connected to hovered task?
+  // Active focus: clicked card takes priority over hover
+  const focusId = selectedId || hoveredId;
+  const connectedToFocus = useMemo(() => {
+    if (!focusId) return new Set<string>();
+    const ids = new Set<string>([focusId]);
+    const addUpstream = (id: string) => {
+      const t = tasks.find(x => x.id === id);
+      if (!t) return;
+      (t.dependsOn || []).forEach(depId => {
+        if (!ids.has(depId)) { ids.add(depId); addUpstream(depId); }
+      });
+    };
+    const addDownstream = (id: string) => {
+      tasks.forEach(t => {
+        if ((t.dependsOn || []).includes(id) && !ids.has(t.id)) {
+          ids.add(t.id);
+          addDownstream(t.id);
+        }
+      });
+    };
+    addUpstream(focusId);
+    addDownstream(focusId);
+    return ids;
+  }, [focusId, tasks]);
+
+  const hasFocus = focusId !== null;
+
+  // Is this edge connected to focused task?
   const isEdgeHighlighted = (e: { from: string; to: string }) => {
-    if (!hasHover) return true; // no hover = all visible
-    return connectedToHover.has(e.from) && connectedToHover.has(e.to);
+    if (!hasFocus) return true;
+    return connectedToFocus.has(e.from) && connectedToFocus.has(e.to);
   };
 
   return (
@@ -363,7 +363,10 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
           position: 'relative',
         }}
       >
-        <div style={{ minWidth: totalWidth, position: 'relative', height: totalHeight }}>
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setSelectedId(null); }}
+          style={{ minWidth: totalWidth, position: 'relative', height: totalHeight }}
+        >
           {/* Lane labels (absolute, left side) */}
           <div style={{
             position: 'absolute', left: 0, top: 0,
@@ -431,15 +434,20 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
             const nextY = i < laneData.length - 1 ? laneYOffsets[i + 1] : totalHeight - 20;
             const h = nextY - laneYOffsets[i];
             return (
-              <div key={lane.key + '-bg'} style={{
-                position: 'absolute',
-                top: laneYOffsets[i],
-                left: LANE_LABEL_W,
-                right: 0,
-                height: h,
-                borderBottom: '1px solid #F2F0EC',
-                background: i % 2 === 0 ? 'transparent' : 'rgba(0,0,0,.01)',
-              }} />
+              <div
+                key={lane.key + '-bg'}
+                onClick={() => setSelectedId(null)}
+                style={{
+                  position: 'absolute',
+                  top: laneYOffsets[i],
+                  left: LANE_LABEL_W,
+                  right: 0,
+                  height: h,
+                  borderBottom: '1px solid #F2F0EC',
+                  background: i % 2 === 0 ? 'transparent' : 'rgba(0,0,0,.01)',
+                  cursor: selectedId ? 'pointer' : 'default',
+                }}
+              />
             );
           })}
 
@@ -479,14 +487,14 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
             const isCritical = criticalSet.has(t.id);
             const isSelected = selectedId === t.id;
             const isHovered = hoveredId === t.id;
-            const isFaded = hasHover && !connectedToHover.has(t.id);
+            const isFaded = hasFocus && !connectedToFocus.has(t.id);
             const catColor = CC[t.category] || CC['기타'];
             return (
               <div
                 key={t.id}
-                onClick={() => setSelectedId(isSelected ? null : t.id)}
-                onMouseEnter={() => setHoveredId(t.id)}
-                onMouseLeave={() => setHoveredId(null)}
+                onClick={(e) => { e.stopPropagation(); setSelectedId(isSelected ? null : t.id); setHoveredId(null); }}
+                onMouseEnter={() => { if (!selectedId) setHoveredId(t.id); }}
+                onMouseLeave={() => { if (!selectedId) setHoveredId(null); }}
                 style={{
                   position: 'absolute',
                   left: LANE_LABEL_W + pos.x,
@@ -595,10 +603,10 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
                   key={`e-${i}`}
                   d={path}
                   fill="none"
-                  stroke={hasHover && highlighted ? '#5F4B82' : '#C4B8A8'}
-                  strokeWidth={hasHover && highlighted ? 1.8 : 1.2}
-                  strokeOpacity={hasHover ? (highlighted ? 0.8 : 0.1) : 0.5}
-                  markerEnd={hasHover && highlighted ? 'url(#arrow-purple)' : 'url(#arrow-gray)'}
+                  stroke={hasFocus && highlighted ? '#5F4B82' : '#C4B8A8'}
+                  strokeWidth={hasFocus && highlighted ? 1.8 : 1.2}
+                  strokeOpacity={hasFocus ? (highlighted ? 0.8 : 0.1) : 0.5}
+                  markerEnd={hasFocus && highlighted ? 'url(#arrow-purple)' : 'url(#arrow-gray)'}
                   style={{ transition: 'stroke-opacity .15s, stroke .15s' }}
                 />
               );
@@ -615,7 +623,7 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
                   fill="none"
                   stroke="#B84848"
                   strokeWidth={2}
-                  strokeOpacity={hasHover ? (highlighted ? 1 : 0.1) : 1}
+                  strokeOpacity={hasFocus ? (highlighted ? 1 : 0.1) : 1}
                   markerEnd="url(#arrow-red)"
                   style={{ transition: 'stroke-opacity .15s' }}
                 />
