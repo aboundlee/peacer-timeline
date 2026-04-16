@@ -2460,7 +2460,15 @@ function Editor({
           <div style={S.r2}>
             <div style={S.field}>
               <label style={S.label}>분류</label>
-              <select value={f.category} onChange={(e) => s('category', e.target.value)} style={S.input}>
+              <select value={f.category} onChange={(e) => {
+                const newCat = e.target.value;
+                const newPhases = trackToPhases[newCat] || [];
+                setF(prev => ({
+                  ...prev,
+                  category: newCat,
+                  project: newPhases.includes(prev.project) ? prev.project : (newPhases[0] || ''),
+                }));
+              }} style={S.input}>
                 {CATS.map((c) => <option key={c}>{c}</option>)}
               </select>
             </div>
