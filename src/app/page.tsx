@@ -1603,10 +1603,9 @@ function DashboardView({
                               e.stopPropagation();
                               const trackCategory: Record<string, string> = { '제품': '제조', '운영': '사업자/인허가', '마케팅': '마케팅' };
                               const phaseMeta = TRACKS.find(tr => tr.name === track.name)?.phases.find(p => p.name === phase.name);
-                              const firstProject = phase.tasks[0]?.project || phaseMeta?.projects[0] || '';
                               onAddNew({
                                 category: trackCategory[track.name] || '기타',
-                                project: firstProject,
+                                project: phase.name,
                                 deadline: phaseMeta?.target || null,
                               });
                             }}
