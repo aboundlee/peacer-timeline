@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import type { AppTask } from '@/lib/criticalPath';
 import { CC, fD, dU } from '@/lib/constants';
 
@@ -37,7 +37,7 @@ const statusLabel = (s: string) => {
   return '시작 전';
 };
 
-// ── Critical path: reverse DFS from sinks to find longest chain ──
+// ── Critical path: reverse DFS using remaining-days cost ──
 function findCriticalPath(tasks: AppTask[], shipDate: string): Set<string> {
   const byId: Record<string, AppTask> = {};
   tasks.forEach(t => { byId[t.id] = t; });
@@ -54,30 +54,41 @@ function findCriticalPath(tasks: AppTask[], shipDate: string): Set<string> {
   // Find sink nodes (tasks that block nothing and are not done)
   const sinks = tasks.filter(t => (!blocks[t.id] || blocks[t.id].length === 0) && t.status !== 'done');
 
-  // DFS backwards from each sink to find longest path
-  const memo: Record<string, string[]> = {};
-  function longestPathFrom(id: string, visited: Set<string>): string[] {
+  // Cost = remaining days until deadline (negative = overdue = highest urgency)
+  const taskCost = (t: AppTask): number => {
+    if (t.status === 'done') return 0;
+    if (!t.deadline) return 14; // assume 2 weeks for unscheduled
+    return Math.max(1, dU(t.deadline));
+  };
+
+  // DFS backwards from each sink — find path with highest total cost (most time-consuming)
+  const memo: Record<string, { path: string[]; cost: number }> = {};
+  function costliestPathFrom(id: string, visited: Set<string>): { path: string[]; cost: number } {
     if (memo[id]) return memo[id];
-    if (visited.has(id)) return [id];
+    if (visited.has(id)) return { path: [id], cost: taskCost(byId[id]) };
     visited.add(id);
-    const deps = (byId[id]?.dependsOn || []).filter(d => byId[d]);
+    const t = byId[id];
+    if (!t) return { path: [id], cost: 0 };
+    const deps = (t.dependsOn || []).filter(d => byId[d] && byId[d].status !== 'done');
+    const myCost = taskCost(t);
     if (deps.length === 0) {
-      memo[id] = [id];
-      return [id];
+      memo[id] = { path: [id], cost: myCost };
+      return memo[id];
     }
-    let best: string[] = [];
+    let best = { path: [] as string[], cost: 0 };
     for (const dep of deps) {
-      const path = longestPathFrom(dep, visited);
-      if (path.length > best.length) best = path;
+      const sub = costliestPathFrom(dep, new Set(visited));
+      if (sub.cost > best.cost) best = sub;
     }
-    memo[id] = [...best, id];
+    memo[id] = { path: [...best.path, id], cost: best.cost + myCost };
     return memo[id];
   }
 
   let criticalChain: string[] = [];
+  let maxCost = 0;
   for (const sink of sinks) {
-    const chain = longestPathFrom(sink.id, new Set());
-    if (chain.length > criticalChain.length) criticalChain = chain;
+    const { path, cost } = costliestPathFrom(sink.id, new Set());
+    if (cost > maxCost) { criticalChain = path; maxCost = cost; }
   }
 
   return new Set(criticalChain);
@@ -109,53 +120,93 @@ function isWeekend(d: string): boolean {
 // ── Main component ──
 export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [showDone, setShowDone] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const todayStr = new Date().toISOString().slice(0, 10);
   const shipDate = '2026-05-19';
 
-  // Filter tasks with dependencies or that have deadlines in range
-  const relevantTasks = useMemo(() => {
+  // Filter tasks: must have deps or be depended upon, or deadline in range
+  const allRelevant = useMemo(() => {
     return tasks.filter(t => {
-      // Include if has dependencies or is depended upon
       const hasDeps = (t.dependsOn || []).length > 0;
       const isDepOf = tasks.some(o => (o.dependsOn || []).includes(t.id));
-      // Or has a deadline in our range
       const inRange = t.deadline && t.deadline >= todayStr && t.deadline <= shipDate;
       return hasDeps || isDepOf || inRange;
     });
   }, [tasks, todayStr]);
 
+  // Apply done filter
+  const relevantTasks = useMemo(() => {
+    if (showDone) return allRelevant;
+    return allRelevant.filter(t => t.status !== 'done');
+  }, [allRelevant, showDone]);
+
+  const doneCount = useMemo(() => allRelevant.filter(t => t.status === 'done').length, [allRelevant]);
+
   // Date axis
   const dates = useMemo(() => dateRange(todayStr, shipDate), [todayStr]);
   const dayW = Math.max(DAY_MIN_W, CARD_W / 3);
 
-  // Assign tasks to lanes
-  const laneData = useMemo(() => {
-    const byId: Record<string, AppTask> = {};
-    tasks.forEach(t => { byId[t.id] = t; });
+  // Tasks with no deadline → separate "unscheduled" bucket
+  const { scheduled, unscheduled } = useMemo(() => {
+    const scheduled: AppTask[] = [];
+    const unscheduled: AppTask[] = [];
+    relevantTasks.forEach(t => {
+      if (t.deadline) scheduled.push(t);
+      else unscheduled.push(t);
+    });
+    return { scheduled, unscheduled };
+  }, [relevantTasks]);
 
+  // Assign tasks to lanes (scheduled only for main chart)
+  const laneData = useMemo(() => {
     return LANES.map(lane => {
-      const laneTasks = relevantTasks.filter(lane.match);
+      const laneTasks = scheduled.filter(lane.match);
       return { ...lane, tasks: laneTasks };
     }).filter(l => l.tasks.length > 0);
-  }, [relevantTasks, tasks]);
+  }, [scheduled]);
 
-  // Critical path
+  // Critical path (computed on all tasks, not just visible)
   const criticalSet = useMemo(() => findCriticalPath(tasks, shipDate), [tasks]);
 
-  // Card positions: x based on deadline date, y stacked within lane
+  // Hover-connected task IDs
+  const connectedToHover = useMemo(() => {
+    if (!hoveredId) return new Set<string>();
+    const ids = new Set<string>([hoveredId]);
+    // Upstream (what this task depends on)
+    const addUpstream = (id: string) => {
+      const t = tasks.find(x => x.id === id);
+      if (!t) return;
+      (t.dependsOn || []).forEach(depId => {
+        if (!ids.has(depId)) { ids.add(depId); addUpstream(depId); }
+      });
+    };
+    // Downstream (what depends on this task)
+    const addDownstream = (id: string) => {
+      tasks.forEach(t => {
+        if ((t.dependsOn || []).includes(id) && !ids.has(t.id)) {
+          ids.add(t.id);
+          addDownstream(t.id);
+        }
+      });
+    };
+    addUpstream(hoveredId);
+    addDownstream(hoveredId);
+    return ids;
+  }, [hoveredId, tasks]);
+
+  // Card positions
   const { positions, laneYOffsets, totalHeight, totalWidth } = useMemo(() => {
     const positions: Record<string, { x: number; y: number; laneIdx: number }> = {};
     const laneYOffsets: number[] = [];
     let currentY = HEADER_H + 4;
 
     const dateToX = (d: string | null): number => {
-      if (!d) return (dates.length - 1) * dayW; // no deadline → end
+      if (!d) return (dates.length - 1) * dayW;
       const idx = dates.indexOf(d);
       if (idx >= 0) return idx * dayW;
-      // Before start
       if (d < dates[0]) return 0;
-      // After end
       return (dates.length - 1) * dayW;
     };
 
@@ -163,7 +214,6 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
       const lane = laneData[li];
       laneYOffsets.push(currentY);
 
-      // Sort tasks by deadline
       const sorted = [...lane.tasks].sort((a, b) => {
         const da = a.deadline || '9999-12-31';
         const db = b.deadline || '9999-12-31';
@@ -171,12 +221,10 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
         return a.id < b.id ? -1 : 1;
       });
 
-      // Stack cards that overlap in x
       const placed: { x: number; y: number; right: number }[] = [];
       for (const t of sorted) {
         const x = dateToX(t.deadline) - CARD_W / 2;
         let row = 0;
-        // Find first row where this card doesn't overlap
         while (true) {
           const y = LANE_PAD_TOP + row * (CARD_H + CARD_GAP_Y);
           const overlap = placed.some(p =>
@@ -208,16 +256,14 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
 
   // Scroll to today on mount
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollLeft = 0;
-    }
+    if (scrollRef.current) scrollRef.current.scrollLeft = 0;
   }, []);
 
   const byId: Record<string, AppTask> = {};
   tasks.forEach(t => { byId[t.id] = t; });
 
   // Edge path helper
-  const getEdgePath = (fromId: string, toId: string): string | null => {
+  const getEdgePath = useCallback((fromId: string, toId: string): string | null => {
     const from = positions[fromId];
     const to = positions[toId];
     if (!from || !to) return null;
@@ -230,7 +276,7 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
     const dx = x2 - x1;
     const cp = Math.max(30, Math.abs(dx) * 0.3);
     return `M${x1},${y1} C${x1 + cp},${y1} ${x2 - cp},${y2} ${x2},${y2}`;
-  };
+  }, [positions]);
 
   // Collect all edges
   const edges = useMemo(() => {
@@ -247,6 +293,13 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
   }, [relevantTasks, positions, criticalSet]);
 
   const selectedTask = selectedId ? byId[selectedId] : null;
+  const hasHover = hoveredId !== null;
+
+  // Is this edge connected to hovered task?
+  const isEdgeHighlighted = (e: { from: string; to: string }) => {
+    if (!hasHover) return true; // no hover = all visible
+    return connectedToHover.has(e.from) && connectedToHover.has(e.to);
+  };
 
   return (
     <div style={{ position: 'relative' }}>
@@ -264,7 +317,7 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
         </p>
       </div>
 
-      {/* Legend */}
+      {/* Legend + controls */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 16, padding: '0 16px 10px',
         fontSize: 11, color: '#8A7D72', flexWrap: 'wrap',
@@ -273,19 +326,31 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
           <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#5F4B82' }} /> 진행 중
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#1A1613' }} /> 대기
-        </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#D1D6DB' }} /> 완료
+          <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#1A1613' }} /> 시작 전
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <svg width="24" height="2"><line x1="0" y1="1" x2="24" y2="1" stroke="#8A7D72" strokeWidth="1.5" /></svg>
+          <svg width="24" height="2"><line x1="0" y1="1" x2="24" y2="1" stroke="#C4B8A8" strokeWidth="1.5" /></svg>
           의존 관계
         </span>
         <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <svg width="24" height="2"><line x1="0" y1="1" x2="24" y2="1" stroke="#B84848" strokeWidth="2" /></svg>
-          크리티컬 패스 (출시까지)
+          크리티컬 패스
         </span>
+
+        {/* Done toggle */}
+        <button
+          onClick={() => setShowDone(!showDone)}
+          style={{
+            marginLeft: 'auto',
+            padding: '3px 10px', borderRadius: 100, fontSize: 11, fontWeight: 500,
+            background: showDone ? '#EBF3E6' : '#F2F4F6',
+            color: showDone ? '#3E5A2E' : '#8B95A1',
+            border: `1px solid ${showDone ? '#A8C496' : '#E5E8EB'}`,
+            cursor: 'pointer',
+          }}
+        >
+          {showDone ? `완료 ${doneCount}개 숨기기` : `완료 ${doneCount}개 보기`}
+        </button>
       </div>
 
       {/* Scrollable graph area */}
@@ -299,7 +364,7 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
         }}
       >
         <div style={{ minWidth: totalWidth, position: 'relative', height: totalHeight }}>
-          {/* Fixed lane labels */}
+          {/* Lane labels (absolute, left side) */}
           <div style={{
             position: 'absolute', left: 0, top: 0,
             width: LANE_LABEL_W, height: totalHeight,
@@ -338,7 +403,6 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
             {dates.map((d, i) => {
               const isToday = d === todayStr;
               const isShip = d === shipDate;
-              // Show label every 2-3 days or for today/ship
               const showLabel = isToday || isShip || i % 3 === 0;
               return (
                 <div key={d} style={{
@@ -407,67 +471,22 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
             }} />
           )}
 
-          {/* SVG edges */}
-          <svg
-            style={{
-              position: 'absolute', top: 0, left: 0,
-              width: totalWidth, height: totalHeight,
-              pointerEvents: 'none', zIndex: 2,
-            }}
-          >
-            <defs>
-              <marker id="arrow-gray" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                <path d="M0,0 L6,3 L0,6" fill="none" stroke="#C4B8A8" strokeWidth="1" />
-              </marker>
-              <marker id="arrow-red" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                <path d="M0,0 L6,3 L0,6" fill="none" stroke="#B84848" strokeWidth="1.2" />
-              </marker>
-            </defs>
-            {/* Non-critical edges first (behind) */}
-            {edges.filter(e => !e.critical).map((e, i) => {
-              const path = getEdgePath(e.from, e.to);
-              if (!path) return null;
-              return (
-                <path
-                  key={`e-${i}`}
-                  d={path}
-                  fill="none"
-                  stroke="#C4B8A8"
-                  strokeWidth="1.2"
-                  strokeOpacity={0.5}
-                  markerEnd="url(#arrow-gray)"
-                />
-              );
-            })}
-            {/* Critical edges on top */}
-            {edges.filter(e => e.critical).map((e, i) => {
-              const path = getEdgePath(e.from, e.to);
-              if (!path) return null;
-              return (
-                <path
-                  key={`ce-${i}`}
-                  d={path}
-                  fill="none"
-                  stroke="#B84848"
-                  strokeWidth="2"
-                  markerEnd="url(#arrow-red)"
-                />
-              );
-            })}
-          </svg>
-
-          {/* Task cards */}
+          {/* Task cards — rendered BEFORE SVG so edges appear ON TOP */}
           {relevantTasks.map(t => {
             const pos = positions[t.id];
             if (!pos) return null;
             const sc = statusColor(t.status);
             const isCritical = criticalSet.has(t.id);
             const isSelected = selectedId === t.id;
+            const isHovered = hoveredId === t.id;
+            const isFaded = hasHover && !connectedToHover.has(t.id);
             const catColor = CC[t.category] || CC['기타'];
             return (
               <div
                 key={t.id}
                 onClick={() => setSelectedId(isSelected ? null : t.id)}
+                onMouseEnter={() => setHoveredId(t.id)}
+                onMouseLeave={() => setHoveredId(null)}
                 style={{
                   position: 'absolute',
                   left: LANE_LABEL_W + pos.x,
@@ -475,17 +494,20 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
                   width: CARD_W,
                   height: CARD_H,
                   background: isSelected ? '#FFF' : sc.bg,
-                  border: `1.5px solid ${isCritical ? '#B84848' : sc.bd}`,
+                  border: `1.5px solid ${isCritical ? '#B84848' : isHovered ? '#5F4B82' : sc.bd}`,
                   borderRadius: 8,
                   padding: '6px 10px',
                   cursor: 'pointer',
-                  zIndex: isSelected ? 20 : 4,
+                  zIndex: isSelected ? 20 : isHovered ? 8 : 4,
+                  opacity: isFaded ? 0.25 : 1,
                   boxShadow: isSelected
                     ? '0 4px 16px rgba(0,0,0,.12)'
-                    : isCritical
-                      ? '0 0 0 1px rgba(184,72,72,.15)'
-                      : 'none',
-                  transition: 'box-shadow .15s, border-color .15s',
+                    : isHovered
+                      ? '0 2px 8px rgba(0,0,0,.08)'
+                      : isCritical
+                        ? '0 0 0 1px rgba(184,72,72,.15)'
+                        : 'none',
+                  transition: 'opacity .15s, box-shadow .15s, border-color .15s',
                   overflow: 'hidden',
                   display: 'flex',
                   flexDirection: 'column',
@@ -543,20 +565,115 @@ export default function DependencyGraph({ tasks }: { tasks: AppTask[] }) {
               </div>
             );
           })}
+
+          {/* SVG edges — z-index 6 = ABOVE cards (4) but below selected (20) */}
+          <svg
+            style={{
+              position: 'absolute', top: 0, left: 0,
+              width: totalWidth, height: totalHeight,
+              pointerEvents: 'none', zIndex: 6,
+            }}
+          >
+            <defs>
+              <marker id="arrow-gray" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6" fill="none" stroke="#C4B8A8" strokeWidth="1" />
+              </marker>
+              <marker id="arrow-red" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6" fill="none" stroke="#B84848" strokeWidth="1.2" />
+              </marker>
+              <marker id="arrow-purple" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6" fill="none" stroke="#5F4B82" strokeWidth="1.2" />
+              </marker>
+            </defs>
+            {/* Non-critical edges first */}
+            {edges.filter(e => !e.critical).map((e, i) => {
+              const path = getEdgePath(e.from, e.to);
+              if (!path) return null;
+              const highlighted = isEdgeHighlighted(e);
+              return (
+                <path
+                  key={`e-${i}`}
+                  d={path}
+                  fill="none"
+                  stroke={hasHover && highlighted ? '#5F4B82' : '#C4B8A8'}
+                  strokeWidth={hasHover && highlighted ? 1.8 : 1.2}
+                  strokeOpacity={hasHover ? (highlighted ? 0.8 : 0.1) : 0.5}
+                  markerEnd={hasHover && highlighted ? 'url(#arrow-purple)' : 'url(#arrow-gray)'}
+                  style={{ transition: 'stroke-opacity .15s, stroke .15s' }}
+                />
+              );
+            })}
+            {/* Critical edges on top */}
+            {edges.filter(e => e.critical).map((e, i) => {
+              const path = getEdgePath(e.from, e.to);
+              if (!path) return null;
+              const highlighted = isEdgeHighlighted(e);
+              return (
+                <path
+                  key={`ce-${i}`}
+                  d={path}
+                  fill="none"
+                  stroke="#B84848"
+                  strokeWidth={2}
+                  strokeOpacity={hasHover ? (highlighted ? 1 : 0.1) : 1}
+                  markerEnd="url(#arrow-red)"
+                  style={{ transition: 'stroke-opacity .15s' }}
+                />
+              );
+            })}
+          </svg>
         </div>
       </div>
+
+      {/* Unscheduled tasks (no deadline) */}
+      {unscheduled.length > 0 && (
+        <div style={{
+          margin: '8px 16px 4px',
+          padding: '8px 12px',
+          background: '#FAF6EF',
+          border: '1px solid #E8DFCE',
+          borderRadius: 8,
+          fontSize: 11,
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#8A7D72', marginBottom: 6 }}>
+            마감일 미정 ({unscheduled.length}개)
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {unscheduled.map(t => {
+              const sc = statusColor(t.status);
+              const isCritical = criticalSet.has(t.id);
+              return (
+                <span
+                  key={t.id}
+                  onClick={() => setSelectedId(selectedId === t.id ? null : t.id)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '3px 8px', borderRadius: 6,
+                    background: sc.bg,
+                    border: `1px solid ${isCritical ? '#B84848' : sc.bd}`,
+                    cursor: 'pointer', fontWeight: 500, color: sc.tx,
+                    fontSize: 10,
+                  }}
+                >
+                  {isCritical && <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#B84848' }} />}
+                  {t.title}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Selected task detail panel */}
       {selectedTask && (
         <div style={{
-          margin: '0 16px 8px',
+          margin: '4px 16px 8px',
           padding: '12px 16px',
           background: '#FFF',
           border: '1px solid #E8DFCE',
           borderRadius: 10,
           fontSize: 12,
           color: '#4E5968',
-          animation: 'fadeUp .2s ease-out',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <div>
