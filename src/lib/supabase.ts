@@ -42,6 +42,22 @@ export function dbToApp(row: any) {
   };
 }
 
+// ── Lead times ──
+export type LeadTime = {
+  id: string;
+  item_name: string;
+  category: string | null;
+  lead_days: number | null;
+  buffer_days: number;
+  supplier: string | null;
+  status: 'confirmed' | 'inquiring' | 'tbd';
+  note: string | null;
+  task_id: string | null;
+  target_date: string;
+  created_at: string;
+  updated_at: string;
+};
+
 // Convert app format to DB format
 export function appToDb(task: Record<string, unknown>) {
   const result: Record<string, unknown> = { ...task };
