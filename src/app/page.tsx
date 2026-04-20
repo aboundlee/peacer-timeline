@@ -969,6 +969,23 @@ function DashboardView({
   const [extraPhases, setExtraPhases] = useState<Record<string, Phase[]>>({});
   const [archivedPhases, setArchivedPhases] = useState<Set<string>>(new Set());
   const [showDonePhases, setShowDonePhases] = useState<Record<string, boolean>>({});
+  const [hideDoneTasks, setHideDoneTasks] = useState<boolean>(false);
+
+  // Load hideDoneTasks preference
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('peacer-hide-done-tasks');
+      if (raw === '1') setHideDoneTasks(true);
+    } catch {}
+  }, []);
+
+  const toggleHideDoneTasks = () => {
+    setHideDoneTasks(prev => {
+      const next = !prev;
+      try { localStorage.setItem('peacer-hide-done-tasks', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
 
   // Phase inline edit (double-click) — name only
   type PhaseMeta = { displayName?: string };
@@ -1615,8 +1632,22 @@ function DashboardView({
 
       {/* ═══ 트랙 > 절차(신호등) > TODO ═══ */}
       <div style={{ marginTop: 8 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: '#4E5968', marginBottom: 6, padding: '0 2px', letterSpacing: '-0.01em' }}>
-          트랙
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, padding: '0 2px' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#4E5968', letterSpacing: '-0.01em' }}>
+            트랙
+          </div>
+          <button
+            onClick={toggleHideDoneTasks}
+            style={{
+              padding: '3px 10px', borderRadius: 100, fontSize: 11, fontWeight: 500,
+              background: hideDoneTasks ? '#EFEBFA' : '#F2F4F6',
+              color: hideDoneTasks ? '#5F4B82' : '#8B95A1',
+              border: `1px solid ${hideDoneTasks ? '#A896C4' : '#E5E8EB'}`,
+              cursor: 'pointer',
+            }}
+          >
+            {hideDoneTasks ? '완료 태스크 보기' : '완료 태스크 숨기기'}
+          </button>
         </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {data.trackData.map(track => {
@@ -1800,7 +1831,15 @@ function DashboardView({
                       {/* Phase expanded — show tasks + per-phase add-task button */}
                       {phaseOpen && (
                         <div style={{ padding: '2px 0 6px 34px', display: 'flex', flexDirection: 'column', gap: 1 }}>
-                          {phase.tasks.map(t => renderTask(t))}
+                          {phase.tasks.filter(t => !hideDoneTasks || t.status !== 'done').map(t => renderTask(t))}
+                          {hideDoneTasks && phase.tasks.some(t => t.status === 'done') && (
+                            <div style={{
+                              fontSize: 10, color: '#B5AFA6', fontStyle: 'italic',
+                              padding: '4px 8px', fontWeight: 400,
+                            }}>
+                              완료 {phase.tasks.filter(t => t.status === 'done').length}개 숨김
+                            </div>
+                          )}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
