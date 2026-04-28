@@ -6,52 +6,70 @@ import type { AppTask } from '@/lib/criticalPath';
 import { fD, dU } from '@/lib/constants';
 
 const SHIP_DATE = '2026-05-19';
+const STAGE_ORDER = ['컨택', '테스트', '확정', '발주', '본생산', '출시'];
 
-// Canonical stage order
-const STAGES = ['컨택', '테스트', '확정', '발주', '본생산', '출시'];
-
-const STATUS_PRIORITY: Record<string, number> = { doing: 4, waiting: 3, todo: 2, done: 1 };
-
-type CellState = {
-  tasks: AppTask[];
-  done: number;
-  total: number;
-  hasOverdue: boolean;
-  hasDoing: boolean;
+const statusInfo: Record<string, { label: string; bg: string; tx: string; bd: string; dot: string }> = {
+  doing: { label: '진행중', bg: '#EFEBFA', tx: '#5F4B82', bd: '#A896C4', dot: '#5F4B82' },
+  waiting: { label: '대기', bg: '#F5EEE6', tx: '#8B5A3C', bd: '#C4A896', dot: '#8B5A3C' },
+  done: { label: '완료', bg: '#EBF3E6', tx: '#3E5A2E', bd: '#A8C496', dot: '#A8C496' },
+  todo: { label: '시작 전', bg: '#FAF6EF', tx: '#8A7D72', bd: '#DDD3C2', dot: '#DDD3C2' },
 };
 
-function cellSignal(cell: CellState | null): {
-  symbol: string; bg: string; bd: string; tx: string; label: string;
+function ymd(d: Date) { return d.toISOString().slice(0, 10); }
+
+function projectHealth(tasks: AppTask[]): {
+  status: 'on-track' | 'at-risk' | 'overdue' | 'done' | 'idle';
+  label: string;
+  color: string;
 } {
-  if (!cell || cell.total === 0) {
-    return { symbol: '─', bg: 'transparent', bd: '#F2F4F6', tx: '#D1D6DB', label: '없음' };
-  }
-  if (cell.done === cell.total) {
-    return { symbol: '✓', bg: '#EBF3E6', bd: '#A8C496', tx: '#3E5A2E', label: '완료' };
-  }
-  if (cell.hasOverdue) {
-    return { symbol: '!', bg: '#FDE8E8', bd: '#F04452', tx: '#B84848', label: '지연' };
-  }
-  if (cell.hasDoing) {
-    return { symbol: '●', bg: '#EFEBFA', bd: '#A896C4', tx: '#5F4B82', label: '진행중' };
-  }
-  if (cell.done > 0) {
-    return { symbol: '◐', bg: '#FAF6EF', bd: '#DDD3C2', tx: '#8A7D72', label: '일부 완료' };
-  }
-  return { symbol: '◯', bg: '#FAF6EF', bd: '#E5E8EB', tx: '#8B95A1', label: '대기' };
+  const today = ymd(new Date());
+  const total = tasks.length;
+  const done = tasks.filter(t => t.status === 'done').length;
+  const overdue = tasks.filter(t => t.status !== 'done' && t.deadline && t.deadline < today);
+  const doing = tasks.filter(t => t.status === 'doing' || t.status === 'waiting');
+
+  if (total === 0) return { status: 'idle', label: '미정', color: '#8B95A1' };
+  if (done === total) return { status: 'done', label: '완료', color: '#3E5A2E' };
+  if (overdue.length > 0) return { status: 'overdue', label: `${overdue.length}건 지연`, color: '#B84848' };
+  if (doing.length === 0) return { status: 'idle', label: '대기 중', color: '#8B95A1' };
+
+  // Check for upcoming risk (deadline within 3 days)
+  const soon = tasks.filter(t => t.status !== 'done' && t.deadline && dU(t.deadline) >= 0 && dU(t.deadline) <= 3);
+  if (soon.length > 0) return { status: 'at-risk', label: '임박', color: '#E8A04C' };
+  return { status: 'on-track', label: '정상', color: '#3E5A2E' };
 }
 
-export default function PipelinesPage() {
+// Sort tasks within a project: status priority (overdue/doing first), then deadline asc
+function sortTasks(tasks: AppTask[]): AppTask[] {
+  const today = ymd(new Date());
+  return [...tasks].sort((a, b) => {
+    // Done at the bottom
+    if (a.status === 'done' && b.status !== 'done') return 1;
+    if (a.status !== 'done' && b.status === 'done') return -1;
+    // Overdue first
+    const aOd = a.deadline && a.deadline < today && a.status !== 'done' ? 1 : 0;
+    const bOd = b.deadline && b.deadline < today && b.status !== 'done' ? 1 : 0;
+    if (aOd !== bOd) return bOd - aOd;
+    // Then by deadline asc (no deadline = at the end)
+    const da = a.deadline || '9999-12-31';
+    const db = b.deadline || '9999-12-31';
+    if (da !== db) return da < db ? -1 : 1;
+    // Then by stage order
+    const sa = a.stage ? STAGE_ORDER.indexOf(a.stage) : 99;
+    const sb = b.stage ? STAGE_ORDER.indexOf(b.stage) : 99;
+    return sa - sb;
+  });
+}
+
+export default function ProjectsPage() {
   const [tasks, setTasks] = useState<AppTask[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [selectedCell, setSelectedCell] = useState<{ pipeline: string; stage: string } | null>(null);
-  const [showUnassigned, setShowUnassigned] = useState(false);
+  const [hideDone, setHideDone] = useState(true);
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
 
   const fetchTasks = useCallback(async () => {
     const { data, error } = await supabase
-      .from('tasks')
-      .select('*')
-      .order('created_at', { ascending: true });
+      .from('tasks').select('*').order('created_at', { ascending: true });
     if (error) { console.error(error); return; }
     if (data) {
       setTasks(data.map(dbToApp));
@@ -62,278 +80,271 @@ export default function PipelinesPage() {
   useEffect(() => { fetchTasks(); }, [fetchTasks]);
 
   useEffect(() => {
-    const ch = supabase
-      .channel('pipelines-rt')
+    const ch = supabase.channel('projects-rt')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => fetchTasks())
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [fetchTasks]);
 
-  // Determine pipelines + matrix cells
-  const { pipelines, matrix, unassigned } = useMemo(() => {
-    const pipelineSet = new Set<string>();
-    const matrix: Record<string, Record<string, CellState>> = {};
+  // Group by pipeline
+  const projects = useMemo(() => {
+    const groups: Record<string, AppTask[]> = {};
     const unassigned: AppTask[] = [];
-    const todayStr = new Date().toISOString().slice(0, 10);
-
     tasks.forEach(t => {
-      if (!t.pipeline) {
+      if (t.pipeline) {
+        if (!groups[t.pipeline]) groups[t.pipeline] = [];
+        groups[t.pipeline].push(t);
+      } else {
         unassigned.push(t);
-        return;
       }
-      pipelineSet.add(t.pipeline);
-      const stage = t.stage || '미분류';
-      if (!matrix[t.pipeline]) matrix[t.pipeline] = {};
-      if (!matrix[t.pipeline][stage]) {
-        matrix[t.pipeline][stage] = { tasks: [], done: 0, total: 0, hasOverdue: false, hasDoing: false };
-      }
-      const cell = matrix[t.pipeline][stage];
-      cell.tasks.push(t);
-      cell.total++;
-      if (t.status === 'done') cell.done++;
-      if (t.status === 'doing' || t.status === 'waiting') cell.hasDoing = true;
-      if (t.deadline && t.deadline < todayStr && t.status !== 'done') cell.hasOverdue = true;
     });
-
-    // Sort pipelines: by progress (least done first = needs attention)
-    const pipelines = [...pipelineSet].sort((a, b) => {
-      const sa = STAGES.reduce((s, st) => s + (matrix[a]?.[st]?.done || 0), 0);
-      const ta = STAGES.reduce((s, st) => s + (matrix[a]?.[st]?.total || 0), 0);
-      const sb = STAGES.reduce((s, st) => s + (matrix[b]?.[st]?.done || 0), 0);
-      const tb = STAGES.reduce((s, st) => s + (matrix[b]?.[st]?.total || 0), 0);
-      const pa = ta > 0 ? sa / ta : 0;
-      const pb = tb > 0 ? sb / tb : 0;
-      return pa - pb; // less progress first
+    const list = Object.entries(groups).map(([name, group]) => {
+      const health = projectHealth(group);
+      const total = group.length;
+      const done = group.filter(t => t.status === 'done').length;
+      const sorted = sortTasks(group);
+      const visible = hideDone ? sorted.filter(t => t.status !== 'done') : sorted;
+      // Next action = first non-done sorted task
+      const nextAction = sorted.find(t => t.status !== 'done');
+      // Earliest active deadline
+      const activeDeadlines = group.filter(t => t.status !== 'done' && t.deadline).map(t => t.deadline!);
+      const nearestDeadline = activeDeadlines.length > 0 ? activeDeadlines.reduce((a, b) => a < b ? a : b) : null;
+      return {
+        name, tasks: sorted, visible, total, done, health, nextAction, nearestDeadline,
+        pct: total > 0 ? Math.round((done / total) * 100) : 0,
+      };
     });
-
-    return { pipelines, matrix, unassigned };
-  }, [tasks]);
-
-  // Per-stage bottleneck score (how many pipelines stuck on this stage)
-  const stageBottleneck = useMemo(() => {
-    const result: Record<string, number> = {};
-    STAGES.forEach(stage => {
-      let stuck = 0;
-      pipelines.forEach(p => {
-        const cell = matrix[p]?.[stage];
-        if (cell && cell.total > 0 && cell.done < cell.total && !cell.hasDoing) {
-          stuck++;
-        }
-      });
-      result[stage] = stuck;
+    // Sort: overdue/at-risk first, then by nearest deadline, then by name
+    list.sort((a, b) => {
+      const order = { overdue: 0, 'at-risk': 1, 'on-track': 2, idle: 3, done: 4 };
+      const oa = order[a.health.status as keyof typeof order];
+      const ob = order[b.health.status as keyof typeof order];
+      if (oa !== ob) return oa - ob;
+      if (a.nearestDeadline && b.nearestDeadline) return a.nearestDeadline < b.nearestDeadline ? -1 : 1;
+      return a.name < b.name ? -1 : 1;
     });
-    return result;
-  }, [pipelines, matrix]);
+    return { list, unassigned };
+  }, [tasks, hideDone]);
 
-  // Per-pipeline progress
-  const pipelineProgress = useMemo(() => {
-    const result: Record<string, { done: number; total: number; pct: number }> = {};
-    pipelines.forEach(p => {
-      let done = 0, total = 0;
-      STAGES.forEach(stage => {
-        const cell = matrix[p]?.[stage];
-        if (cell) { done += cell.done; total += cell.total; }
-      });
-      result[p] = { done, total, pct: total > 0 ? Math.round((done / total) * 100) : 0 };
+  const toggleExpand = (name: string) => {
+    setExpandedProjects(prev => {
+      const n = new Set(prev);
+      if (n.has(name)) n.delete(name); else n.add(name);
+      return n;
     });
-    return result;
-  }, [pipelines, matrix]);
-
-  const selectedTasks = selectedCell
-    ? matrix[selectedCell.pipeline]?.[selectedCell.stage]?.tasks || []
-    : [];
+  };
 
   if (!loaded) {
     return <div style={{ padding: '100px 20px', textAlign: 'center', color: '#8B95A1', fontSize: 13 }}>불러오는 중…</div>;
   }
 
   return (
-    <div style={{ maxWidth: 1200, margin: '0 auto', padding: '24px 20px 80px', fontFamily: 'Pretendard, "Noto Sans KR", sans-serif' }}>
+    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 20px 80px', fontFamily: 'Pretendard, "Noto Sans KR", sans-serif' }}>
       {/* Header */}
-      <div style={{ marginBottom: 24 }}>
+      <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500, letterSpacing: '0.05em', marginBottom: 6 }}>
-          PIPELINES
+          PROJECTS
         </div>
         <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#1A1613', letterSpacing: '-0.02em' }}>
-          파이프라인
+          프로젝트별 일정
         </h1>
         <p style={{ margin: '6px 0 0', fontSize: 13, color: '#8B95A1', lineHeight: 1.5 }}>
-          각 워크스트림이 어느 단계에 있는지 한눈에. 출하 <strong style={{ color: '#4E5968' }}>{fD(SHIP_DATE)} (D-{dU(SHIP_DATE)})</strong>.
+          각 프로젝트가 어디까지 왔는지, 다음 액션이 뭔지 한눈에. 출하 <strong style={{ color: '#5F4B82' }}>{fD(SHIP_DATE)} (D-{dU(SHIP_DATE)})</strong>.
         </p>
       </div>
 
-      {/* Legend */}
+      {/* Controls */}
       <div style={{
-        display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap',
-        padding: '10px 14px', background: '#FFF', border: '1px solid #E5E8EB', borderRadius: 10,
-        marginBottom: 16, fontSize: 11,
+        display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', justifyContent: 'space-between',
       }}>
-        <LegendItem symbol="✓" bg="#EBF3E6" bd="#A8C496" tx="#3E5A2E" label="완료" />
-        <LegendItem symbol="●" bg="#EFEBFA" bd="#A896C4" tx="#5F4B82" label="진행중" />
-        <LegendItem symbol="◐" bg="#FAF6EF" bd="#DDD3C2" tx="#8A7D72" label="일부 완료" />
-        <LegendItem symbol="◯" bg="#FAF6EF" bd="#E5E8EB" tx="#8B95A1" label="대기" />
-        <LegendItem symbol="!" bg="#FDE8E8" bd="#F04452" tx="#B84848" label="지연" />
-        <LegendItem symbol="─" bg="transparent" bd="#F2F4F6" tx="#D1D6DB" label="해당 없음" />
+        <div style={{ fontSize: 12, color: '#8B95A1' }}>
+          <strong style={{ color: '#1A1613', fontSize: 14, fontWeight: 700 }}>{projects.list.length}</strong> 프로젝트 ·
+          <strong style={{ color: '#B84848', fontSize: 14, fontWeight: 700, marginLeft: 6 }}>
+            {projects.list.filter(p => p.health.status === 'overdue').length}
+          </strong> 지연 ·
+          <strong style={{ color: '#E8A04C', fontSize: 14, fontWeight: 700, marginLeft: 6 }}>
+            {projects.list.filter(p => p.health.status === 'at-risk').length}
+          </strong> 임박
+        </div>
+        <button
+          onClick={() => setHideDone(!hideDone)}
+          style={{
+            padding: '4px 12px', borderRadius: 100, fontSize: 11, fontWeight: 500,
+            background: hideDone ? '#EFEBFA' : '#F2F4F6',
+            color: hideDone ? '#5F4B82' : '#8B95A1',
+            border: `1px solid ${hideDone ? '#A896C4' : '#E5E8EB'}`,
+            cursor: 'pointer',
+          }}
+        >
+          {hideDone ? '완료 보기' : '완료 숨기기'}
+        </button>
       </div>
 
-      {/* Matrix */}
-      {pipelines.length === 0 ? (
+      {/* Project cards */}
+      {projects.list.length === 0 ? (
         <div style={{
           padding: '60px 20px', textAlign: 'center', background: '#FFF',
           border: '1px solid #E5E8EB', borderRadius: 12, color: '#8B95A1',
         }}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: '#4E5968' }}>아직 파이프라인이 없어요</div>
-          <p style={{ fontSize: 12, margin: 0 }}>태스크 편집에서 워크스트림을 지정하면 여기에 나타나요.</p>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: '#4E5968' }}>아직 프로젝트가 없어요</div>
+          <p style={{ fontSize: 12, margin: 0 }}>태스크에 워크스트림을 지정하면 여기에 나타나요.</p>
         </div>
       ) : (
-        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-          <table style={{
-            width: '100%', minWidth: 720,
-            borderCollapse: 'separate', borderSpacing: 0,
-            background: '#FFF', borderRadius: 12, overflow: 'hidden',
-            border: '1px solid #E5E8EB',
-          }}>
-            <thead>
-              <tr>
-                <th style={{ ...thStyle, textAlign: 'left', minWidth: 140, paddingLeft: 16 }}>워크스트림</th>
-                <th style={{ ...thStyle, minWidth: 80, textAlign: 'left' }}>진행</th>
-                {STAGES.map(stage => {
-                  const stuck = stageBottleneck[stage];
-                  const isBottleneck = stuck >= 2;
-                  return (
-                    <th key={stage} style={{
-                      ...thStyle, minWidth: 80,
-                      color: isBottleneck ? '#B84848' : '#4E5968',
-                      background: isBottleneck ? '#FDE8E8' : '#FAFAF8',
-                    }}>
-                      {stage}
-                      {isBottleneck && (
-                        <div style={{ fontSize: 9, fontWeight: 500, color: '#B84848', marginTop: 2 }}>
-                          {stuck}개 막힘
-                        </div>
-                      )}
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {pipelines.map((p, idx) => {
-                const prog = pipelineProgress[p];
-                return (
-                  <tr key={p} style={{ background: idx % 2 === 1 ? '#FAFAF8' : '#FFF' }}>
-                    <td style={{ ...tdStyle, paddingLeft: 16, fontWeight: 600, color: '#1A1613' }}>
-                      {p}
-                    </td>
-                    <td style={{ ...tdStyle, fontSize: 11, color: '#8B95A1', whiteSpace: 'nowrap' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <div style={{
-                          width: 50, height: 4, background: '#F2F4F6', borderRadius: 2, overflow: 'hidden',
-                        }}>
-                          <div style={{
-                            width: `${prog.pct}%`, height: '100%',
-                            background: prog.pct === 100 ? '#A8C496' : '#A896C4',
-                            transition: 'width .3s',
-                          }} />
-                        </div>
-                        <span style={{ fontWeight: 600, color: '#4E5968', fontSize: 11 }}>
-                          {prog.pct}%
-                        </span>
-                      </div>
-                    </td>
-                    {STAGES.map(stage => {
-                      const cell = matrix[p]?.[stage] || null;
-                      const sig = cellSignal(cell);
-                      const isSelected = selectedCell?.pipeline === p && selectedCell?.stage === stage;
-                      const clickable = cell && cell.total > 0;
-                      return (
-                        <td
-                          key={stage}
-                          style={{ ...tdStyle, padding: 4, textAlign: 'center', cursor: clickable ? 'pointer' : 'default' }}
-                          onClick={() => clickable && setSelectedCell(isSelected ? null : { pipeline: p, stage })}
-                        >
-                          <div
-                            title={`${sig.label}${cell ? ` (${cell.done}/${cell.total})` : ''}`}
-                            style={{
-                              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                              width: 38, height: 28, borderRadius: 6,
-                              background: sig.bg,
-                              border: `1.5px solid ${isSelected ? '#5F4B82' : sig.bd}`,
-                              color: sig.tx,
-                              fontSize: 13, fontWeight: 700,
-                              boxShadow: isSelected ? '0 0 0 3px rgba(95,75,130,.15)' : 'none',
-                              transition: 'box-shadow .15s, border-color .15s',
-                            }}
-                          >
-                            {sig.symbol}
-                          </div>
-                          {cell && cell.total > 0 && (
-                            <div style={{ fontSize: 9, color: '#8B95A1', marginTop: 2 }}>
-                              {cell.done}/{cell.total}
-                            </div>
-                          )}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {projects.list.map(proj => (
+            <ProjectCard
+              key={proj.name}
+              project={proj}
+              expanded={expandedProjects.has(proj.name)}
+              onToggle={() => toggleExpand(proj.name)}
+            />
+          ))}
         </div>
       )}
 
-      {/* Selected cell tasks */}
-      {selectedCell && (
-        <div style={{
-          marginTop: 16, padding: '14px 16px',
-          background: '#FFF', border: '1px solid #E5E8EB', borderRadius: 12,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div>
-              <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>
-                {selectedCell.pipeline} · {selectedCell.stage}
-              </span>
-              <h4 style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 600, color: '#1A1613' }}>
-                {selectedTasks.length}개 태스크
-              </h4>
-            </div>
-            <button
-              onClick={() => setSelectedCell(null)}
-              style={{ background: 'none', border: 'none', fontSize: 18, color: '#8B95A1', cursor: 'pointer' }}
-            >×</button>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {selectedTasks
-              .sort((a, b) => (STATUS_PRIORITY[b.status] || 0) - (STATUS_PRIORITY[a.status] || 0))
-              .map(t => <TaskRow key={t.id} task={t} />)}
-          </div>
+      {projects.unassigned.length > 0 && (
+        <div style={{ marginTop: 16, padding: '10px 14px', background: '#FAFAF8', border: '1px dashed #E5E8EB', borderRadius: 8, fontSize: 11, color: '#8B95A1' }}>
+          ⚠ 워크스트림 미지정 태스크 {projects.unassigned.filter(t => t.status !== 'done').length}개 — 태스크 편집에서 워크스트림을 지정해주세요.
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* Unassigned tasks */}
-      {unassigned.length > 0 && (
-        <div style={{ marginTop: 20 }}>
-          <button
-            onClick={() => setShowUnassigned(!showUnassigned)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              background: 'none', border: 'none', cursor: 'pointer',
-              fontSize: 12, color: '#8B95A1', padding: '8px 4px',
-            }}
-          >
-            <span style={{ transform: showUnassigned ? 'rotate(90deg)' : 'rotate(0)', transition: 'transform .2s' }}>▸</span>
-            워크스트림 미지정 {unassigned.filter(t => t.status !== 'done').length}개
-          </button>
-          {showUnassigned && (
-            <div style={{
-              marginTop: 4, padding: 12,
-              background: '#FAFAF8', border: '1px dashed #E5E8EB', borderRadius: 10,
-              display: 'flex', flexDirection: 'column', gap: 6,
+type ProjectData = {
+  name: string;
+  tasks: AppTask[];
+  visible: AppTask[];
+  total: number;
+  done: number;
+  health: ReturnType<typeof projectHealth>;
+  nextAction: AppTask | undefined;
+  nearestDeadline: string | null;
+  pct: number;
+};
+
+function ProjectCard({ project, expanded, onToggle }: {
+  project: ProjectData;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const { name, visible, done, total, health, nextAction, nearestDeadline, pct } = project;
+  const showAll = expanded;
+  const previewCount = 4;
+  const tasksToShow = showAll ? visible : visible.slice(0, previewCount);
+  const moreCount = Math.max(0, visible.length - tasksToShow.length);
+
+  return (
+    <div style={{
+      background: '#FFF',
+      border: `1px solid ${health.status === 'overdue' ? '#F0C4C4' : '#E5E8EB'}`,
+      borderLeft: `3px solid ${health.color}`,
+      borderRadius: 12,
+      overflow: 'hidden',
+    }}>
+      {/* Header */}
+      <div
+        onClick={onToggle}
+        style={{
+          padding: '14px 16px',
+          display: 'flex', alignItems: 'center', gap: 12,
+          cursor: 'pointer',
+          background: '#FFF',
+          borderBottom: visible.length > 0 ? '1px solid #F2F4F6' : 'none',
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+            <span style={{
+              fontSize: 9, padding: '2px 7px', borderRadius: 100, fontWeight: 600,
+              background: health.color === '#3E5A2E' ? '#EBF3E6' : health.color === '#B84848' ? '#FDE8E8' : health.color === '#E8A04C' ? '#FFF4E0' : '#F2F4F6',
+              color: health.color, border: `1px solid ${health.color}33`,
             }}>
-              {unassigned.filter(t => t.status !== 'done').map(t => <TaskRow key={t.id} task={t} />)}
+              {health.label}
+            </span>
+            <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#1A1613', letterSpacing: '-0.01em' }}>
+              {name}
+            </h3>
+          </div>
+          {nextAction ? (
+            <div style={{ fontSize: 12, color: '#4E5968', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ color: '#8B95A1', fontWeight: 500 }}>다음:</span>
+              <span style={{ fontWeight: 500 }}>{nextAction.title}</span>
+              {nextAction.deadline && (
+                <span style={{
+                  fontSize: 11, fontWeight: 600,
+                  color: dU(nextAction.deadline) < 0 ? '#B84848' : dU(nextAction.deadline) <= 3 ? '#E8A04C' : '#8B95A1',
+                }}>
+                  {fD(nextAction.deadline)} {dU(nextAction.deadline) < 0 ? `(D+${Math.abs(dU(nextAction.deadline))})` : dU(nextAction.deadline) === 0 ? '(오늘)' : `(D-${dU(nextAction.deadline)})`}
+                </span>
+              )}
+              {nextAction.owner && (
+                <span style={{ fontSize: 10, color: '#8B95A1' }}>· {nextAction.owner}</span>
+              )}
             </div>
+          ) : (
+            <div style={{ fontSize: 12, color: '#8B95A1' }}>모든 작업 완료 🎉</div>
+          )}
+        </div>
+
+        {/* Right side: progress + count */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>
+              {done}/{total}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+              <div style={{ width: 60, height: 4, background: '#F2F4F6', borderRadius: 2, overflow: 'hidden' }}>
+                <div style={{
+                  width: `${pct}%`, height: '100%',
+                  background: pct === 100 ? '#A8C496' : '#A896C4',
+                }} />
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 600, color: '#4E5968', minWidth: 28 }}>
+                {pct}%
+              </span>
+            </div>
+          </div>
+          <span style={{
+            fontSize: 12, color: '#8B95A1',
+            transform: expanded ? 'rotate(90deg)' : 'rotate(0)',
+            transition: 'transform .2s',
+          }}>▸</span>
+        </div>
+      </div>
+
+      {/* Timeline body */}
+      {visible.length > 0 && (
+        <div style={{ padding: '8px 0' }}>
+          {tasksToShow.map((task, i) => {
+            const isLast = i === tasksToShow.length - 1 && moreCount === 0;
+            return <TaskRow key={task.id} task={task} isLast={isLast} />;
+          })}
+          {moreCount > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggle(); }}
+              style={{
+                marginLeft: 16, marginTop: 4,
+                background: 'none', border: 'none',
+                fontSize: 11, color: '#5F4B82', fontWeight: 500, cursor: 'pointer',
+                padding: '4px 0',
+              }}
+            >
+              + {moreCount}개 더 보기
+            </button>
+          )}
+          {showAll && visible.length > previewCount && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggle(); }}
+              style={{
+                marginLeft: 16, marginTop: 4,
+                background: 'none', border: 'none',
+                fontSize: 11, color: '#8B95A1', fontWeight: 500, cursor: 'pointer',
+                padding: '4px 0',
+              }}
+            >
+              접기
+            </button>
           )}
         </div>
       )}
@@ -341,82 +352,64 @@ export default function PipelinesPage() {
   );
 }
 
-function TaskRow({ task }: { task: AppTask }) {
-  const today = new Date().toISOString().slice(0, 10);
+function TaskRow({ task, isLast }: { task: AppTask; isLast: boolean }) {
+  const today = ymd(new Date());
   const overdue = task.deadline && task.deadline < today && task.status !== 'done';
-  const statusInfo: Record<string, { label: string; bg: string; tx: string }> = {
-    doing: { label: '진행중', bg: '#EFEBFA', tx: '#5F4B82' },
-    waiting: { label: '대기', bg: '#F5EEE6', tx: '#8B5A3C' },
-    done: { label: '완료', bg: '#EBF3E6', tx: '#3E5A2E' },
-    todo: { label: '시작 전', bg: '#FAF6EF', tx: '#8A7D72' },
-  };
   const si = statusInfo[task.status] || statusInfo.todo;
+  const dColor = overdue ? '#B84848' : task.deadline && dU(task.deadline) <= 3 ? '#E8A04C' : '#8B95A1';
 
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 10,
-      padding: '8px 10px',
-      background: task.status === 'done' ? '#FAFAF8' : '#FFF',
-      border: '1px solid #F2F4F6',
-      borderRadius: 8,
-      opacity: task.status === 'done' ? 0.7 : 1,
+      display: 'flex', alignItems: 'center', gap: 12,
+      padding: '8px 16px',
+      borderBottom: isLast ? 'none' : '1px dashed #F2F4F6',
+      opacity: task.status === 'done' ? 0.55 : 1,
+      background: 'transparent',
     }}>
+      {/* Date column */}
+      <div style={{
+        flexShrink: 0, width: 56,
+        textAlign: 'left', fontSize: 11, fontWeight: 600,
+        color: dColor,
+        fontVariantNumeric: 'tabular-nums',
+      }}>
+        {task.deadline ? fD(task.deadline) : '─'}
+      </div>
+
+      {/* Stage chip */}
+      <div style={{
+        flexShrink: 0, width: 48,
+        fontSize: 10, color: '#8B95A1', fontWeight: 500,
+      }}>
+        {task.stage || ''}
+      </div>
+
+      {/* Title */}
+      <div style={{
+        flex: 1, minWidth: 0,
+        fontSize: 12,
+        color: task.status === 'done' ? '#8B95A1' : '#1A1613',
+        textDecoration: task.status === 'done' ? 'line-through' : 'none',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        {task.title}
+      </div>
+
+      {/* Owner */}
+      {task.owner && (
+        <span style={{ fontSize: 10, color: '#8B95A1', flexShrink: 0 }}>
+          {task.owner}
+        </span>
+      )}
+
+      {/* Status pill */}
       <span style={{
+        flexShrink: 0,
         fontSize: 9, fontWeight: 600, padding: '1px 7px', borderRadius: 100,
-        background: si.bg, color: si.tx, flexShrink: 0,
+        background: si.bg, color: si.tx,
       }}>
         {si.label}
       </span>
-      <span style={{
-        fontSize: 12, color: task.status === 'done' ? '#8B95A1' : '#1A1613',
-        textDecoration: task.status === 'done' ? 'line-through' : 'none',
-        flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>
-        {task.title}
-      </span>
-      {task.owner && (
-        <span style={{ fontSize: 10, color: '#8B95A1', fontWeight: 500 }}>{task.owner}</span>
-      )}
-      {task.deadline && (
-        <span style={{
-          fontSize: 11, fontWeight: 600,
-          color: overdue ? '#B84848' : '#8B95A1',
-          flexShrink: 0,
-        }}>
-          {fD(task.deadline)}
-        </span>
-      )}
     </div>
   );
 }
-
-function LegendItem({ symbol, bg, bd, tx, label }: { symbol: string; bg: string; bd: string; tx: string; label: string }) {
-  return (
-    <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#8B95A1' }}>
-      <span style={{
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        width: 22, height: 18, borderRadius: 4,
-        background: bg, border: `1px solid ${bd}`, color: tx,
-        fontSize: 11, fontWeight: 700,
-      }}>
-        {symbol}
-      </span>
-      {label}
-    </span>
-  );
-}
-
-const thStyle: React.CSSProperties = {
-  fontSize: 11, fontWeight: 600, color: '#4E5968',
-  padding: '12px 8px',
-  textAlign: 'center',
-  borderBottom: '1px solid #E5E8EB',
-  background: '#FAFAF8',
-  position: 'sticky', top: 0,
-};
-
-const tdStyle: React.CSSProperties = {
-  padding: '10px 8px',
-  fontSize: 12,
-  borderBottom: '1px solid #F2F4F6',
-};

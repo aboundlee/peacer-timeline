@@ -687,50 +687,6 @@ export default function App() {
         <DependencyGraph tasks={tasks} />
       </CollapsibleSection>
 
-      {/* ─── SECTION: 전체 보기 (칸반) — done tasks hidden ─── */}
-      <CollapsibleSection
-        title="전체 보기"
-        sectionKey="kanban"
-        collapsed={!!collapsed.kanban}
-        onToggle={() => toggleCollapse('kanban')}
-      >
-        <div style={{ ...S.filterBar, padding: '0 0 8px', margin: 0 }}>
-          <div style={S.filters}>
-            <select value={fCat} onChange={(e) => setFCat(e.target.value)} style={S.sel}>
-              <option value="all">전체 분류</option>
-              {CATS.map((c) => <option key={c}>{c}</option>)}
-            </select>
-            <select value={fOwn} onChange={(e) => setFOwn(e.target.value)} style={S.sel}>
-              <option value="all">전체 담당</option>
-              {OWNERS.map((o) => <option key={o}>{o}</option>)}
-            </select>
-          </div>
-          <button
-            onClick={() => { setSelectMode(!selectMode); if (selectMode) setSelectedIds(new Set()); }}
-            style={{ ...S.toolBtn, background: selectMode ? '#5F4B82' : '#FAF6EF', color: selectMode ? '#fff' : '#5F4B82' }}
-          >
-            {selectMode ? '선택 해제' : '선택'}
-          </button>
-        </div>
-        <BoardView
-          tasks={filtered.filter(t => t.status !== 'done')}
-          selectMode={selectMode} selectedIds={selectedIds}
-          onSelect={toggleSelect}
-          onEdit={setEditId}
-          onChangeStatus={changeStatus}
-          onCycleOwner={cycleOwner}
-          onCyclePriority={cyclePriority}
-          onMarkDone={markDone}
-          onDateClick={(id, e) => { setDatePickerId(id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
-          dragId={dragId}
-          dragCol={dragCol}
-          onDS={(id) => setDragId(id)}
-          onDO={(s) => (e: React.DragEvent) => { e.preventDefault(); setDragCol(s); }}
-          onDD={(s) => () => { if (dragId) up(dragId, { status: s as AppTask['status'] }); setDragId(null); setDragCol(null); }}
-          onDE={() => { setDragId(null); setDragCol(null); }}
-        />
-      </CollapsibleSection>
-
       {/* ─── BATCH ACTION BAR ─── */}
       {selectMode && selectedIds.size > 0 && (
         <div style={S.batchBar}>
