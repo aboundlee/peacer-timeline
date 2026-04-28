@@ -239,7 +239,7 @@ export default function GanttPage() {
       {/* Header */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500, letterSpacing: '0.05em', marginBottom: 6 }}>
-          GANTT
+          LAUNCH SCHEDULE
         </div>
         <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: '#1A1613', letterSpacing: '-0.02em' }}>
           출시 일정
