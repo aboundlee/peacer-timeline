@@ -12,6 +12,7 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { href: '/', label: '타임라인', icon: '◐' },
+  { href: '/pipelines', label: '파이프라인', icon: '◇' },
   { href: '/lead-times', label: '리드타임', icon: '◑' },
 ];
 

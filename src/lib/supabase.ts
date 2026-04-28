@@ -11,6 +11,8 @@ export type Task = {
   title: string;
   category: string;
   project: string | null;
+  pipeline: string | null;
+  stage: string | null;
   owner: string;
   deadline: string | null;
   status: 'todo' | 'doing' | 'waiting' | 'done';
@@ -30,6 +32,8 @@ export function dbToApp(row: any) {
     title: row.title as string,
     category: (LEGACY_CAT_MAP[row.category] || row.category) as string,
     project: (row.project || null) as string | null,
+    pipeline: (row.pipeline || null) as string | null,
+    stage: (row.stage || null) as string | null,
     owner: row.owner as string,
     deadline: (row.deadline || null) as string | null,
     status: row.status as 'todo' | 'doing' | 'waiting' | 'done',
