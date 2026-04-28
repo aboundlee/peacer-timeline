@@ -5,6 +5,8 @@ export type AppTask = {
   title: string;
   category: string;
   project: string | null;
+  pipeline?: string | null;
+  stage?: string | null;
   owner: string;
   deadline: string | null;
   status: string;

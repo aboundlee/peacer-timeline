@@ -2602,16 +2602,32 @@ function Editor({
     title: task?.title || iv.title || '',
     category: task?.category || iv.category || '기타',
     project: task?.project || iv.project || '',
+    pipeline: task?.pipeline || iv.pipeline || '',
+    stage: task?.stage || iv.stage || '',
     owner: task?.owner || iv.owner || OWNERS[0],
     deadline: task?.deadline || iv.deadline || '',
     status: task?.status || iv.status || 'todo',
     note: task?.note || iv.note || '',
     priority: task?.priority || iv.priority || 'medium',
   });
+
+  // Existing pipelines and stages from data
+  const allPipelines = useMemo(() => {
+    const set = new Set<string>();
+    allTasks.forEach(t => { if (t.pipeline) set.add(t.pipeline); });
+    return [...set].sort();
+  }, [allTasks]);
+  const PIPELINE_STAGES = ['컨택', '테스트', '확정', '발주', '본생산', '출시'];
   const s = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const save = () => {
     if (!f.title.trim()) return;
-    onSave({ ...f, title: f.title.trim(), deadline: f.deadline || null });
+    onSave({
+      ...f,
+      title: f.title.trim(),
+      deadline: f.deadline || null,
+      pipeline: f.pipeline.trim() || null,
+      stage: f.stage || null,
+    });
   };
 
   // Close on Escape
@@ -2654,6 +2670,28 @@ function Editor({
                 {f.project && !(trackToPhases[f.category] || []).includes(f.project) && (
                   <option value={f.project}>{f.project} (기존)</option>
                 )}
+              </select>
+            </div>
+          </div>
+          <div style={S.r2}>
+            <div style={S.field}>
+              <label style={S.label}>워크스트림</label>
+              <input
+                value={f.pipeline}
+                onChange={(e) => s('pipeline', e.target.value)}
+                list="pipeline-options"
+                placeholder="라벤더, 홀더, 사업자…"
+                style={S.input}
+              />
+              <datalist id="pipeline-options">
+                {allPipelines.map(p => <option key={p} value={p} />)}
+              </datalist>
+            </div>
+            <div style={S.field}>
+              <label style={S.label}>단계</label>
+              <select value={f.stage} onChange={(e) => s('stage', e.target.value)} style={S.input}>
+                <option value="">(없음)</option>
+                {PIPELINE_STAGES.map(st => <option key={st} value={st}>{st}</option>)}
               </select>
             </div>
           </div>
