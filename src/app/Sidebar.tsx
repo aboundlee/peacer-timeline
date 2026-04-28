@@ -13,8 +13,7 @@ type NavItem = {
 const NAV: NavItem[] = [
   { href: '/', label: '대시보드', icon: '◐' },
   { href: '/gantt', label: '간트', icon: '▦' },
-  { href: '/pipelines', label: '파이프라인', icon: '◇' },
-  { href: '/lead-times', label: '리드타임', icon: '◑' },
+  { href: '/pipelines', label: '프로젝트', icon: '◇' },
 ];
 
 export default function Sidebar({
