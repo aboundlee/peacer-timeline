@@ -64,6 +64,7 @@ export default function ProjectsPage() {
   const [loaded, setLoaded] = useState(false);
   const [hideDone, setHideDone] = useState(true);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState('');
 
   const fetchTasks = useCallback(async () => {
     const { data, error } = await supabase
@@ -132,8 +133,39 @@ export default function ProjectsPage() {
     }
   }, [fetchTasks]);
 
-  // Group by pipeline
+  // Rename pipeline (updates all tasks with this pipeline name)
+  const renamePipeline = useCallback(async (oldName: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) return;
+    setTasks(prev => prev.map(t => t.pipeline === oldName ? { ...t, pipeline: trimmed } : t));
+    const { error } = await supabase.from('tasks').update({ pipeline: trimmed }).eq('pipeline', oldName);
+    if (error) {
+      console.error(error);
+      fetchTasks();
+    }
+  }, [fetchTasks]);
+
+  // All pipeline names (for "move to" menu)
+  const allPipelineNames = useMemo(() => {
+    const set = new Set<string>();
+    tasks.forEach(t => { if (t.pipeline) set.add(t.pipeline); });
+    return [...set].sort();
+  }, [tasks]);
+
+  // Group by pipeline (search filters tasks; pipelines with 0 visible tasks are hidden)
   const projects = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const matches = (t: AppTask): boolean => {
+      if (!q) return true;
+      return (
+        t.title.toLowerCase().includes(q) ||
+        (t.pipeline || '').toLowerCase().includes(q) ||
+        (t.stage || '').toLowerCase().includes(q) ||
+        (t.owner || '').toLowerCase().includes(q) ||
+        (t.note || '').toLowerCase().includes(q)
+      );
+    };
+
     const groups: Record<string, AppTask[]> = {};
     const unassigned: AppTask[] = [];
     tasks.forEach(t => {
@@ -149,15 +181,23 @@ export default function ProjectsPage() {
       const total = group.length;
       const done = group.filter(t => t.status === 'done').length;
       const sorted = sortTasks(group);
-      const visible = hideDone ? sorted.filter(t => t.status !== 'done') : sorted;
+      let visible = hideDone ? sorted.filter(t => t.status !== 'done') : sorted;
+      if (q) visible = visible.filter(matches);
       const nextAction = sorted.find(t => t.status !== 'done');
       const activeDeadlines = group.filter(t => t.status !== 'done' && t.deadline).map(t => t.deadline!);
       const nearestDeadline = activeDeadlines.length > 0 ? activeDeadlines.reduce((a, b) => a < b ? a : b) : null;
+      const matchesProjectName = !q || name.toLowerCase().includes(q);
+      const hasVisibleTask = visible.length > 0;
       return {
         name, tasks: sorted, visible, total, done, health, nextAction, nearestDeadline,
         pct: total > 0 ? Math.round((done / total) * 100) : 0,
+        hidden: q !== '' && !matchesProjectName && !hasVisibleTask,
       };
-    });
+    }).filter(p => !p.hidden);
+
+    let unassignedFiltered = hideDone ? unassigned.filter(t => t.status !== 'done') : unassigned;
+    if (q) unassignedFiltered = unassignedFiltered.filter(matches);
+
     list.sort((a, b) => {
       const order = { overdue: 0, 'at-risk': 1, 'on-track': 2, idle: 3, done: 4 };
       const oa = order[a.health.status as keyof typeof order];
@@ -166,8 +206,8 @@ export default function ProjectsPage() {
       if (a.nearestDeadline && b.nearestDeadline) return a.nearestDeadline < b.nearestDeadline ? -1 : 1;
       return a.name < b.name ? -1 : 1;
     });
-    return { list, unassigned };
-  }, [tasks, hideDone]);
+    return { list, unassigned: unassignedFiltered, allUnassigned: unassigned };
+  }, [tasks, hideDone, search]);
 
   const toggleExpand = (name: string) => {
     setExpandedProjects(prev => {
@@ -199,37 +239,71 @@ export default function ProjectsPage() {
         </p>
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ fontSize: 12, color: '#8B95A1' }}>
-          <strong style={{ color: '#1A1613', fontSize: 14, fontWeight: 700 }}>{projects.list.length}</strong> 프로젝트 ·
-          <strong style={{ color: '#B84848', fontSize: 14, fontWeight: 700, marginLeft: 6 }}>
-            {projects.list.filter(p => p.health.status === 'overdue').length}
-          </strong> 지연 ·
-          <strong style={{ color: '#E8A04C', fontSize: 14, fontWeight: 700, marginLeft: 6 }}>
-            {projects.list.filter(p => p.health.status === 'at-risk').length}
-          </strong> 임박
-        </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="제목, 프로젝트, 단계, 담당, 메모로 검색…"
+          style={{
+            flex: 1, padding: '8px 12px',
+            border: '1px solid #E5E8EB', borderRadius: 8,
+            background: '#FFF', fontSize: 13, color: '#1A1613', outline: 'none',
+            fontFamily: 'inherit',
+          }}
+        />
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            style={{
+              padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 500,
+              background: '#F2F4F6', color: '#4E5968', border: '1px solid #E5E8EB',
+              cursor: 'pointer',
+            }}
+          >초기화</button>
+        )}
         <button
           onClick={() => setHideDone(!hideDone)}
           style={{
-            padding: '4px 12px', borderRadius: 100, fontSize: 11, fontWeight: 500,
+            padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 500,
             background: hideDone ? '#EFEBFA' : '#F2F4F6',
             color: hideDone ? '#5F4B82' : '#8B95A1',
             border: `1px solid ${hideDone ? '#A896C4' : '#E5E8EB'}`,
-            cursor: 'pointer',
+            cursor: 'pointer', whiteSpace: 'nowrap',
           }}
         >
           {hideDone ? '완료 보기' : '완료 숨기기'}
         </button>
       </div>
 
-      {projects.list.length === 0 ? (
+      <div style={{ fontSize: 12, color: '#8B95A1', marginBottom: 12 }}>
+        <strong style={{ color: '#1A1613', fontSize: 14, fontWeight: 700 }}>{projects.list.length}</strong> 프로젝트 ·
+        <strong style={{ color: '#B84848', fontSize: 14, fontWeight: 700, marginLeft: 6 }}>
+          {projects.list.filter(p => p.health.status === 'overdue').length}
+        </strong> 지연 ·
+        <strong style={{ color: '#E8A04C', fontSize: 14, fontWeight: 700, marginLeft: 6 }}>
+          {projects.list.filter(p => p.health.status === 'at-risk').length}
+        </strong> 임박
+        {projects.allUnassigned.filter(t => t.status !== 'done').length > 0 && (
+          <span style={{ marginLeft: 6 }}>
+            ·
+            <strong style={{ color: '#8B95A1', fontSize: 14, fontWeight: 700, marginLeft: 6 }}>
+              {projects.allUnassigned.filter(t => t.status !== 'done').length}
+            </strong> 미지정
+          </span>
+        )}
+      </div>
+
+      {projects.list.length === 0 && projects.unassigned.length === 0 ? (
         <div style={{
           padding: '60px 20px', textAlign: 'center', background: '#FFF',
           border: '1px solid #E5E8EB', borderRadius: 12, color: '#8B95A1',
         }}>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: '#4E5968' }}>아직 프로젝트가 없어요</div>
-          <p style={{ fontSize: 12, margin: 0 }}>태스크에 워크스트림을 지정하면 여기에 나타나요.</p>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: '#4E5968' }}>
+            {search ? '검색 결과 없음' : '아직 프로젝트가 없어요'}
+          </div>
+          <p style={{ fontSize: 12, margin: 0 }}>
+            {search ? '다른 검색어를 시도해보세요.' : '태스크에 워크스트림을 지정하면 여기에 나타나요.'}
+          </p>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -237,19 +311,26 @@ export default function ProjectsPage() {
             <ProjectCard
               key={proj.name}
               project={proj}
+              allPipelines={allPipelineNames}
               expanded={expandedProjects.has(proj.name)}
               onToggle={() => toggleExpand(proj.name)}
               onUpdate={updateTask}
               onCreate={createTask}
               onDelete={deleteTask}
+              onRenamePipeline={renamePipeline}
             />
           ))}
-        </div>
-      )}
-
-      {projects.unassigned.length > 0 && (
-        <div style={{ marginTop: 16, padding: '10px 14px', background: '#FAFAF8', border: '1px dashed #E5E8EB', borderRadius: 8, fontSize: 11, color: '#8B95A1' }}>
-          ⚠ 워크스트림 미지정 태스크 {projects.unassigned.filter(t => t.status !== 'done').length}개 — 태스크 편집에서 워크스트림을 지정해주세요.
+          {/* Unassigned tasks as a pseudo-project */}
+          {projects.unassigned.length > 0 && (
+            <UnassignedCard
+              tasks={projects.unassigned}
+              allPipelines={allPipelineNames}
+              expanded={expandedProjects.has('__unassigned__')}
+              onToggle={() => toggleExpand('__unassigned__')}
+              onUpdate={updateTask}
+              onDelete={deleteTask}
+            />
+          )}
         </div>
       )}
     </div>
@@ -268,19 +349,31 @@ type ProjectData = {
   pct: number;
 };
 
-function ProjectCard({ project, expanded, onToggle, onUpdate, onCreate, onDelete }: {
+function ProjectCard({ project, allPipelines, expanded, onToggle, onUpdate, onCreate, onDelete, onRenamePipeline }: {
   project: ProjectData;
+  allPipelines: string[];
   expanded: boolean;
   onToggle: () => void;
   onUpdate: (id: string, patch: Partial<AppTask>) => void;
   onCreate: (pipeline: string, partial: Partial<AppTask>) => void;
   onDelete: (id: string) => void;
+  onRenamePipeline: (oldName: string, newName: string) => void;
 }) {
   const { name, visible, done, total, health, nextAction, pct } = project;
   const [adding, setAdding] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newDate, setNewDate] = useState('');
   const [newStage, setNewStage] = useState<string>('');
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(name);
+
+  useEffect(() => { setNameDraft(name); }, [name]);
+
+  const saveName = () => {
+    const t = nameDraft.trim();
+    if (t && t !== name) onRenamePipeline(name, t);
+    setEditingName(false);
+  };
 
   const showAll = expanded;
   const previewCount = 4;
@@ -331,9 +424,38 @@ function ProjectCard({ project, expanded, onToggle, onUpdate, onCreate, onDelete
             }}>
               {health.label}
             </span>
-            <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#1A1613', letterSpacing: '-0.01em' }}>
-              {name}
-            </h3>
+            {editingName ? (
+              <input
+                autoFocus
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onBlur={saveName}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveName();
+                  if (e.key === 'Escape') { setNameDraft(name); setEditingName(false); }
+                }}
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  fontSize: 15, fontWeight: 700, color: '#1A1613', letterSpacing: '-0.01em',
+                  padding: '2px 6px', border: '1.5px solid #5F4B82', borderRadius: 4,
+                  background: '#FFF', outline: 'none', minWidth: 120,
+                }}
+              />
+            ) : (
+              <h3
+                onClick={(e) => { e.stopPropagation(); setEditingName(true); }}
+                title="클릭해서 이름 변경"
+                style={{
+                  margin: 0, fontSize: 15, fontWeight: 700, color: '#1A1613',
+                  letterSpacing: '-0.01em', cursor: 'text',
+                  padding: '2px 4px', borderRadius: 4,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#F2F4F6'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+              >
+                {name}
+              </h3>
+            )}
           </div>
           {nextAction ? (
             <div style={{ fontSize: 12, color: '#4E5968', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -387,6 +509,7 @@ function ProjectCard({ project, expanded, onToggle, onUpdate, onCreate, onDelete
             <EditableTaskRow
               key={task.id}
               task={task}
+              allPipelines={allPipelines}
               onUpdate={onUpdate}
               onDelete={onDelete}
               isLast={i === tasksToShow.length - 1 && moreCount === 0 && !adding}
@@ -497,15 +620,30 @@ function ProjectCard({ project, expanded, onToggle, onUpdate, onCreate, onDelete
   );
 }
 
-function EditableTaskRow({ task, onUpdate, onDelete, isLast }: {
+function EditableTaskRow({ task, allPipelines, onUpdate, onDelete, isLast }: {
   task: AppTask;
+  allPipelines: string[];
   onUpdate: (id: string, patch: Partial<AppTask>) => void;
   onDelete: (id: string) => void;
   isLast: boolean;
 }) {
   const [editingField, setEditingField] = useState<'title' | 'date' | null>(null);
   const [titleDraft, setTitleDraft] = useState(task.title);
+  const [menuOpen, setMenuOpen] = useState(false);
   const dateRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [menuOpen]);
 
   useEffect(() => { setTitleDraft(task.title); }, [task.title]);
 
@@ -688,6 +826,83 @@ function EditableTaskRow({ task, onUpdate, onDelete, isLast }: {
         {si.label}
       </button>
 
+      {/* More menu — move to other pipeline / unassign */}
+      <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
+        <button
+          onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+          title="이동/메뉴"
+          style={{
+            background: 'transparent', border: 'none',
+            fontSize: 12, color: '#D1D6DB',
+            cursor: 'pointer', padding: '2px 4px',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = '#5F4B82'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = '#D1D6DB'; }}
+        >⋯</button>
+        {menuOpen && (
+          <div style={{
+            position: 'absolute', top: '100%', right: 0, zIndex: 50,
+            marginTop: 4, minWidth: 180,
+            background: '#FFF', border: '1px solid #E5E8EB', borderRadius: 8,
+            boxShadow: '0 8px 24px rgba(0,0,0,.08)',
+            padding: 4, fontSize: 11,
+          }}
+          onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: '6px 10px 4px', fontSize: 10, color: '#8B95A1', fontWeight: 600, letterSpacing: '0.05em' }}>
+              다른 프로젝트로 이동
+            </div>
+            {allPipelines.filter(p => p !== task.pipeline).map(p => (
+              <button
+                key={p}
+                onClick={() => { onUpdate(task.id, { pipeline: p }); setMenuOpen(false); }}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '6px 10px', borderRadius: 4,
+                  background: 'transparent', border: 'none', fontSize: 12,
+                  color: '#1A1613', cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#F2F4F6'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+              >
+                {p}
+              </button>
+            ))}
+            <button
+              onClick={() => {
+                const name = window.prompt('새 프로젝트 이름');
+                if (name && name.trim()) {
+                  onUpdate(task.id, { pipeline: name.trim() });
+                }
+                setMenuOpen(false);
+              }}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '6px 10px', borderRadius: 4,
+                background: 'transparent', border: 'none', fontSize: 12,
+                color: '#5F4B82', fontWeight: 600, cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#F2F4F6'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >+ 새 프로젝트…</button>
+            <div style={{ height: 1, background: '#F2F4F6', margin: '4px 0' }} />
+            {task.pipeline && (
+              <button
+                onClick={() => { onUpdate(task.id, { pipeline: null }); setMenuOpen(false); }}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '6px 10px', borderRadius: 4,
+                  background: 'transparent', border: 'none', fontSize: 12,
+                  color: '#8B95A1', cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#F2F4F6'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+              >프로젝트 해제</button>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Delete */}
       <button
         onClick={handleDelete}
@@ -701,6 +916,92 @@ function EditableTaskRow({ task, onUpdate, onDelete, isLast }: {
         onMouseEnter={(e) => { e.currentTarget.style.color = '#B84848'; }}
         onMouseLeave={(e) => { e.currentTarget.style.color = '#D1D6DB'; }}
       >×</button>
+    </div>
+  );
+}
+
+function UnassignedCard({ tasks, allPipelines, expanded, onToggle, onUpdate, onDelete }: {
+  tasks: AppTask[];
+  allPipelines: string[];
+  expanded: boolean;
+  onToggle: () => void;
+  onUpdate: (id: string, patch: Partial<AppTask>) => void;
+  onDelete: (id: string) => void;
+}) {
+  const sorted = sortTasks(tasks);
+  const previewCount = 4;
+  const tasksToShow = expanded ? sorted : sorted.slice(0, previewCount);
+  const moreCount = Math.max(0, sorted.length - tasksToShow.length);
+
+  return (
+    <div style={{
+      background: '#FFF',
+      border: '1px dashed #E5E8EB',
+      borderLeft: '3px solid #C4B8A8',
+      borderRadius: 12,
+      overflow: 'hidden',
+    }}>
+      <div
+        onClick={onToggle}
+        style={{
+          padding: '14px 16px', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', gap: 12,
+          borderBottom: tasks.length > 0 ? '1px solid #F2F4F6' : 'none',
+        }}
+      >
+        <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+            <span style={{
+              fontSize: 9, padding: '2px 7px', borderRadius: 100, fontWeight: 600,
+              background: '#F2F4F6', color: '#8B95A1', border: '1px solid #E5E8EB',
+            }}>
+              미지정
+            </span>
+            <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: '#4E5968' }}>
+              프로젝트 미지정 태스크
+            </h3>
+          </div>
+          <div style={{ fontSize: 11, color: '#8B95A1' }}>
+            아래 메뉴(⋯)에서 프로젝트로 이동시키세요.
+          </div>
+        </div>
+        <span style={{ fontSize: 12, color: '#8B95A1', fontWeight: 600 }}>
+          {tasks.length}개
+        </span>
+        <span style={{
+          fontSize: 12, color: '#8B95A1',
+          transform: expanded ? 'rotate(90deg)' : 'rotate(0)',
+          transition: 'transform .2s',
+        }}>▸</span>
+      </div>
+
+      {tasks.length > 0 && (
+        <div style={{ padding: '6px 0' }}>
+          {tasksToShow.map((task, i) => (
+            <EditableTaskRow
+              key={task.id}
+              task={task}
+              allPipelines={allPipelines}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
+              isLast={i === tasksToShow.length - 1 && moreCount === 0}
+            />
+          ))}
+          {moreCount > 0 && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggle(); }}
+              style={{
+                marginLeft: 16, marginTop: 4,
+                background: 'none', border: 'none',
+                fontSize: 11, color: '#5F4B82', fontWeight: 500, cursor: 'pointer',
+                padding: '4px 0',
+              }}
+            >
+              + {moreCount}개 더 보기
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
