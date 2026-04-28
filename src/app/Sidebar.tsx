@@ -12,7 +12,7 @@ type NavItem = {
 
 const NAV: NavItem[] = [
   { href: '/', label: '대시보드', icon: '◐' },
-  { href: '/gantt', label: '간트', icon: '▦' },
+  { href: '/gantt', label: '출시 일정', icon: '▦' },
   { href: '/pipelines', label: '프로젝트', icon: '◇' },
 ];
 
