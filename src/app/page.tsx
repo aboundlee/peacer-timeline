@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase, dbToApp, appToDb } from '@/lib/supabase';
 import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, PROJECT_META, TRACKS, CUSTOMER_GOAL, LEGACY_PROJECT_MAP, LEGACY_CAT_MAP, dU, fD, uid, type Phase } from '@/lib/constants';
+import DependencyGraph from './DependencyGraph';
 import { calcCriticalPath, AppTask } from '@/lib/criticalPath';
 
 // ═══════════════════════════════════════════════════
@@ -676,48 +677,14 @@ export default function App() {
         <WeeklyGrid tasks={tasks} onEdit={setEditId} onDateChange={handleDateChange} />
       </CollapsibleSection>
 
-      {/* ─── SECTION: 전체 보기 (칸반) — done tasks hidden ─── */}
+      {/* ─── SECTION: 의존성 그래프 ─── */}
       <CollapsibleSection
-        title="전체 보기"
-        sectionKey="kanban"
-        collapsed={!!collapsed.kanban}
-        onToggle={() => toggleCollapse('kanban')}
+        title="의존성 그래프"
+        sectionKey="depGraph"
+        collapsed={!!collapsed.depGraph}
+        onToggle={() => toggleCollapse('depGraph')}
       >
-        <div style={{ ...S.filterBar, padding: '0 0 8px', margin: 0 }}>
-          <div style={S.filters}>
-            <select value={fCat} onChange={(e) => setFCat(e.target.value)} style={S.sel}>
-              <option value="all">전체 분류</option>
-              {CATS.map((c) => <option key={c}>{c}</option>)}
-            </select>
-            <select value={fOwn} onChange={(e) => setFOwn(e.target.value)} style={S.sel}>
-              <option value="all">전체 담당</option>
-              {OWNERS.map((o) => <option key={o}>{o}</option>)}
-            </select>
-          </div>
-          <button
-            onClick={() => { setSelectMode(!selectMode); if (selectMode) setSelectedIds(new Set()); }}
-            style={{ ...S.toolBtn, background: selectMode ? '#5F4B82' : '#FAF6EF', color: selectMode ? '#fff' : '#5F4B82' }}
-          >
-            {selectMode ? '선택 해제' : '선택'}
-          </button>
-        </div>
-        <BoardView
-          tasks={filtered.filter(t => t.status !== 'done')}
-          selectMode={selectMode} selectedIds={selectedIds}
-          onSelect={toggleSelect}
-          onEdit={setEditId}
-          onChangeStatus={changeStatus}
-          onCycleOwner={cycleOwner}
-          onCyclePriority={cyclePriority}
-          onMarkDone={markDone}
-          onDateClick={(id, e) => { setDatePickerId(id); setDatePickerPos({ top: e.clientY, left: e.clientX }); }}
-          dragId={dragId}
-          dragCol={dragCol}
-          onDS={(id) => setDragId(id)}
-          onDO={(s) => (e: React.DragEvent) => { e.preventDefault(); setDragCol(s); }}
-          onDD={(s) => () => { if (dragId) up(dragId, { status: s as AppTask['status'] }); setDragId(null); setDragCol(null); }}
-          onDE={() => { setDragId(null); setDragCol(null); }}
-        />
+        <DependencyGraph tasks={tasks} />
       </CollapsibleSection>
 
       {/* ─── BATCH ACTION BAR ─── */}
@@ -956,6 +923,25 @@ function DashboardView({
   const [openTracks, setOpenTracks] = useState<Set<string>>(() => new Set(['제품', '운영', '마케팅']));
   const [openPhases, setOpenPhases] = useState<Set<string>>(new Set());
   const [extraPhases, setExtraPhases] = useState<Record<string, Phase[]>>({});
+  const [archivedPhases, setArchivedPhases] = useState<Set<string>>(new Set());
+  const [showDonePhases, setShowDonePhases] = useState<Record<string, boolean>>({});
+  const [hideDoneTasks, setHideDoneTasks] = useState<boolean>(false);
+
+  // Load hideDoneTasks preference
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('peacer-hide-done-tasks');
+      if (raw === '1') setHideDoneTasks(true);
+    } catch {}
+  }, []);
+
+  const toggleHideDoneTasks = () => {
+    setHideDoneTasks(prev => {
+      const next = !prev;
+      try { localStorage.setItem('peacer-hide-done-tasks', next ? '1' : '0'); } catch {}
+      return next;
+    });
+  };
 
   // Phase inline edit (double-click) — name only
   type PhaseMeta = { displayName?: string };
@@ -991,6 +977,32 @@ function DashboardView({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [editingPhaseKey]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('peacer-archived-phases');
+      if (raw) setArchivedPhases(new Set(JSON.parse(raw)));
+    } catch {}
+  }, []);
+
+  const archivePhase = (phaseKey: string) => {
+    setArchivedPhases(prev => {
+      const next = new Set(prev);
+      next.add(phaseKey);
+      try { localStorage.setItem('peacer-archived-phases', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+    setEditingPhaseKey(null);
+  };
+
+  const unarchivePhase = (phaseKey: string) => {
+    setArchivedPhases(prev => {
+      const next = new Set(prev);
+      next.delete(phaseKey);
+      try { localStorage.setItem('peacer-archived-phases', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  };
 
   useEffect(() => {
     try {
@@ -1115,7 +1127,13 @@ function DashboardView({
       const allPhases = [...track.phases, ...orphanPhases];
       const phases = allPhases
         .map(getPhaseStatus)
-        .filter(p => p.total > 0);
+        .filter(p => p.total > 0)
+        // Sort by target date ascending (no target = end)
+        .sort((a, b) => {
+          const da = a.target ? new Date(a.target).getTime() : Infinity;
+          const db = b.target ? new Date(b.target).getTime() : Infinity;
+          return da - db;
+        });
       const done = phases.reduce((s, p) => s + p.done, 0);
       const total = phases.reduce((s, p) => s + p.total, 0);
       const hasOverdue = phases.some(p => p.status === 'overdue');
@@ -1570,8 +1588,22 @@ function DashboardView({
 
       {/* ═══ 트랙 > 절차(신호등) > TODO ═══ */}
       <div style={{ marginTop: 8 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: '#4E5968', marginBottom: 6, padding: '0 2px', letterSpacing: '-0.01em' }}>
-          트랙
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, padding: '0 2px' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#4E5968', letterSpacing: '-0.01em' }}>
+            트랙
+          </div>
+          <button
+            onClick={toggleHideDoneTasks}
+            style={{
+              padding: '3px 10px', borderRadius: 100, fontSize: 11, fontWeight: 500,
+              background: hideDoneTasks ? '#EFEBFA' : '#F2F4F6',
+              color: hideDoneTasks ? '#5F4B82' : '#8B95A1',
+              border: `1px solid ${hideDoneTasks ? '#A896C4' : '#E5E8EB'}`,
+              cursor: 'pointer',
+            }}
+          >
+            {hideDoneTasks ? '완료 태스크 보기' : '완료 태스크 숨기기'}
+          </button>
         </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       {data.trackData.map(track => {
@@ -1637,17 +1669,28 @@ function DashboardView({
             </div>
 
             {/* Track expanded — show phases with signal lights */}
-            {isOpen && (
-              <div style={{ borderTop: '1px solid #F2F4F6', padding: '4px 6px 6px' }}>
-                {track.phases.map(phase => {
+            {isOpen && (() => {
+              const activePhases = track.phases.filter(p => {
+                const pk = `${track.name}/${p.name}`;
+                return p.status !== 'done' && !archivedPhases.has(pk);
+              });
+              const donePhases = track.phases.filter(p => {
+                const pk = `${track.name}/${p.name}`;
+                return p.status === 'done' || archivedPhases.has(pk);
+              });
+              const showDone = showDonePhases[track.name] || false;
+
+              const renderPhaseRow = (phase: typeof track.phases[0]) => {
                   const phaseKey = `${track.name}/${phase.name}`;
                   const phaseOpen = openPhases.has(phaseKey);
                   const phasePct = phase.total > 0 ? Math.round((phase.done / phase.total) * 100) : 0;
                   const meta = phaseMeta[phaseKey];
                   const displayName = meta?.displayName || phase.name;
                   const isEditing = editingPhaseKey === phaseKey;
+                  const isArchived = archivedPhases.has(phaseKey);
+                  const isDone = phase.status === 'done' || isArchived;
                   return (
-                    <div key={phase.name} style={{ marginBottom: 2 }}>
+                    <div key={phase.name} style={{ marginBottom: 2, opacity: isDone ? 0.6 : 1 }}>
                       {/* Phase row — double-click to edit name */}
                       {isEditing ? (
                         <div
@@ -1677,6 +1720,23 @@ function DashboardView({
                               border: 'none', borderRadius: 4, padding: '3px 10px', cursor: 'pointer',
                             }}
                           >저장</button>
+                          {isArchived ? (
+                            <button
+                              onClick={() => unarchivePhase(phaseKey)}
+                              style={{
+                                fontSize: 11, fontWeight: 600, color: '#3182F6', background: '#EBF3FE',
+                                border: '1px solid #B8D4F8', borderRadius: 4, padding: '3px 10px', cursor: 'pointer',
+                              }}
+                            >복원</button>
+                          ) : (
+                            <button
+                              onClick={() => archivePhase(phaseKey)}
+                              style={{
+                                fontSize: 11, fontWeight: 600, color: '#8B95A1', background: '#F2F4F6',
+                                border: '1px solid #E5E8EB', borderRadius: 4, padding: '3px 10px', cursor: 'pointer',
+                              }}
+                            >아카이브</button>
+                          )}
                         </div>
                       ) : (
                       <div
@@ -1698,8 +1758,15 @@ function DashboardView({
                           background: signalColor(phase.status),
                           boxShadow: phase.status === 'overdue' ? '0 0 4px rgba(240,68,82,.4)' : 'none',
                         }} />
-                        <span style={{ fontSize: 13, fontWeight: 500, color: '#4E5968', flex: 1 }}>{displayName}</span>
-                        {phase.target && phase.status !== 'done' && (
+                        <span style={{
+                          fontSize: 13, fontWeight: 500, flex: 1,
+                          color: isDone ? '#8B95A1' : '#4E5968',
+                          textDecoration: isDone ? 'line-through' : 'none',
+                        }}>{displayName}</span>
+                        {isDone && (
+                          <span style={{ fontSize: 10, fontWeight: 500, color: '#A8C496', background: '#EBF3E6', borderRadius: 3, padding: '1px 6px' }}>완료</span>
+                        )}
+                        {phase.target && !isDone && (
                           <span style={{
                             fontSize: 11, fontWeight: 500,
                             color: dU(phase.target) < 0 ? '#F04452' : '#8B95A1',
@@ -1720,7 +1787,15 @@ function DashboardView({
                       {/* Phase expanded — show tasks + per-phase add-task button */}
                       {phaseOpen && (
                         <div style={{ padding: '2px 0 6px 34px', display: 'flex', flexDirection: 'column', gap: 1 }}>
-                          {phase.tasks.map(t => renderTask(t))}
+                          {phase.tasks.filter(t => !hideDoneTasks || t.status !== 'done').map(t => renderTask(t))}
+                          {hideDoneTasks && phase.tasks.some(t => t.status === 'done') && (
+                            <div style={{
+                              fontSize: 10, color: '#B5AFA6', fontStyle: 'italic',
+                              padding: '4px 8px', fontWeight: 400,
+                            }}>
+                              완료 {phase.tasks.filter(t => t.status === 'done').length}개 숨김
+                            </div>
+                          )}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1749,7 +1824,39 @@ function DashboardView({
                       )}
                     </div>
                   );
-                })}
+              };
+
+              return (
+              <div style={{ borderTop: '1px solid #F2F4F6', padding: '4px 6px 6px' }}>
+                {activePhases.map(renderPhaseRow)}
+
+                {/* Completed / archived projects — collapsed by default */}
+                {donePhases.length > 0 && (
+                  <div style={{ marginTop: 4 }}>
+                    <div
+                      onClick={() => setShowDonePhases(prev => ({ ...prev, [track.name]: !prev[track.name] }))}
+                      className="dash-row"
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        padding: '4px 12px', cursor: 'pointer', borderRadius: 6,
+                        minHeight: 24,
+                      }}
+                    >
+                      <span style={{ fontSize: 11, color: '#8B95A1', fontWeight: 500 }}>
+                        완료된 프로젝트 {donePhases.length}개
+                      </span>
+                      <svg width="10" height="10" viewBox="0 0 14 14" fill="none" style={{
+                        color: '#8B95A1',
+                        transform: showDone ? 'rotate(90deg)' : 'rotate(0deg)',
+                        transition: 'transform .2s ease', flexShrink: 0,
+                      }}>
+                        <path d="M5.5 3.5L9 7l-3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    </div>
+                    {showDone && donePhases.map(renderPhaseRow)}
+                  </div>
+                )}
+
                 {/* Add new project (phase-level) — opens editor with new project name preset */}
                 <button
                   onClick={(e) => {
@@ -1778,7 +1885,8 @@ function DashboardView({
                   프로젝트 추가
                 </button>
               </div>
-            )}
+              );
+            })()}
           </div>
         );
       })}
@@ -2450,16 +2558,32 @@ function Editor({
     title: task?.title || iv.title || '',
     category: task?.category || iv.category || '기타',
     project: task?.project || iv.project || '',
+    pipeline: task?.pipeline || iv.pipeline || '',
+    stage: task?.stage || iv.stage || '',
     owner: task?.owner || iv.owner || OWNERS[0],
     deadline: task?.deadline || iv.deadline || '',
     status: task?.status || iv.status || 'todo',
     note: task?.note || iv.note || '',
     priority: task?.priority || iv.priority || 'medium',
   });
+
+  // Existing pipelines and stages from data
+  const allPipelines = useMemo(() => {
+    const set = new Set<string>();
+    allTasks.forEach(t => { if (t.pipeline) set.add(t.pipeline); });
+    return [...set].sort();
+  }, [allTasks]);
+  const PIPELINE_STAGES = ['컨택', '테스트', '확정', '발주', '본생산', '출시'];
   const s = (k: string, v: string) => setF((p) => ({ ...p, [k]: v }));
   const save = () => {
     if (!f.title.trim()) return;
-    onSave({ ...f, title: f.title.trim(), deadline: f.deadline || null });
+    onSave({
+      ...f,
+      title: f.title.trim(),
+      deadline: f.deadline || null,
+      pipeline: f.pipeline.trim() || null,
+      stage: f.stage || null,
+    });
   };
 
   // Close on Escape
@@ -2502,6 +2626,28 @@ function Editor({
                 {f.project && !(trackToPhases[f.category] || []).includes(f.project) && (
                   <option value={f.project}>{f.project} (기존)</option>
                 )}
+              </select>
+            </div>
+          </div>
+          <div style={S.r2}>
+            <div style={S.field}>
+              <label style={S.label}>워크스트림</label>
+              <input
+                value={f.pipeline}
+                onChange={(e) => s('pipeline', e.target.value)}
+                list="pipeline-options"
+                placeholder="라벤더, 홀더, 사업자…"
+                style={S.input}
+              />
+              <datalist id="pipeline-options">
+                {allPipelines.map(p => <option key={p} value={p} />)}
+              </datalist>
+            </div>
+            <div style={S.field}>
+              <label style={S.label}>단계</label>
+              <select value={f.stage} onChange={(e) => s('stage', e.target.value)} style={S.input}>
+                <option value="">(없음)</option>
+                {PIPELINE_STAGES.map(st => <option key={st} value={st}>{st}</option>)}
               </select>
             </div>
           </div>
