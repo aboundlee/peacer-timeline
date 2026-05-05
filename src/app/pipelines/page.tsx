@@ -64,7 +64,25 @@ export default function ProjectsPage() {
   const [loaded, setLoaded] = useState(false);
   const [hideDone, setHideDone] = useState(true);
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const [collapsedTracks, setCollapsedTracks] = useState<Set<string>>(new Set());
+  const [addingProjectInTrack, setAddingProjectInTrack] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+
+  // Persist track collapsed state
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('peacer-pipelines-collapsed-tracks');
+      if (raw) setCollapsedTracks(new Set(JSON.parse(raw)));
+    } catch {}
+  }, []);
+  const toggleTrack = (name: string) => {
+    setCollapsedTracks(prev => {
+      const n = new Set(prev);
+      if (n.has(name)) n.delete(name); else n.add(name);
+      try { localStorage.setItem('peacer-pipelines-collapsed-tracks', JSON.stringify([...n])); } catch {}
+      return n;
+    });
+  };
 
   const fetchTasks = useCallback(async () => {
     const { data, error } = await supabase
@@ -209,6 +227,52 @@ export default function ProjectsPage() {
     return { list, unassigned: unassignedFiltered, allUnassigned: unassigned };
   }, [tasks, hideDone, search]);
 
+  // Group projects by track (dominant category)
+  const tracks = useMemo(() => {
+    const TRACK_ORDER = ['제품', '운영', '마케팅', '기타'];
+    const TRACK_META: Record<string, { emoji: string; color: string; bg: string }> = {
+      '제품':   { emoji: '🧴', color: '#5F4B82', bg: '#EFEBFA' },
+      '운영':   { emoji: '🏢', color: '#2E5A82', bg: '#E4EFF5' },
+      '마케팅': { emoji: '📣', color: '#8B4848', bg: '#FAF0F0' },
+      '기타':   { emoji: '📌', color: '#4A3F38', bg: '#F5F1EA' },
+    };
+    const buckets: Record<string, ProjectData[]> = {};
+    TRACK_ORDER.forEach(t => { buckets[t] = []; });
+
+    projects.list.forEach(p => {
+      // Determine dominant category
+      const counts: Record<string, number> = {};
+      p.tasks.forEach(t => {
+        const c = t.category || '기타';
+        counts[c] = (counts[c] || 0) + 1;
+      });
+      // Map legacy categories to current 4
+      const legacyMap: Record<string, string> = {
+        '제조': '제품', '디자인': '제품', '사업자/인허가': '운영', '계약': '운영',
+      };
+      const remapped: Record<string, number> = {};
+      Object.entries(counts).forEach(([k, v]) => {
+        const target = legacyMap[k] || k;
+        const final = TRACK_ORDER.includes(target) ? target : '기타';
+        remapped[final] = (remapped[final] || 0) + v;
+      });
+      const dominant = Object.entries(remapped).sort((a, b) => b[1] - a[1])[0]?.[0] || '기타';
+      buckets[dominant].push(p);
+    });
+
+    return TRACK_ORDER.map(name => {
+      const projs = buckets[name];
+      const total = projs.reduce((s, p) => s + p.total, 0);
+      const done = projs.reduce((s, p) => s + p.done, 0);
+      const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+      const overdue = projs.filter(p => p.health.status === 'overdue').length;
+      const atRisk = projs.filter(p => p.health.status === 'at-risk').length;
+      // Hide if no projects AND it's "기타" (avoid empty etc track)
+      // Always show 제품/운영/마케팅 even if empty (so user sees they can add)
+      return { name, projects: projs, total, done, pct, overdue, atRisk, ...TRACK_META[name] };
+    }).filter(t => t.name !== '기타' || t.projects.length > 0);
+  }, [projects.list]);
+
   const toggleExpand = (name: string) => {
     setExpandedProjects(prev => {
       const n = new Set(prev);
@@ -306,20 +370,121 @@ export default function ProjectsPage() {
           </p>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {projects.list.map(proj => (
-            <ProjectCard
-              key={proj.name}
-              project={proj}
-              allPipelines={allPipelineNames}
-              expanded={expandedProjects.has(proj.name)}
-              onToggle={() => toggleExpand(proj.name)}
-              onUpdate={updateTask}
-              onCreate={createTask}
-              onDelete={deleteTask}
-              onRenamePipeline={renamePipeline}
-            />
-          ))}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {tracks.map(track => {
+            const isCollapsed = collapsedTracks.has(track.name);
+            const isAdding = addingProjectInTrack === track.name;
+            return (
+              <section key={track.name}>
+                {/* Track header */}
+                <div
+                  onClick={() => toggleTrack(track.name)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '10px 12px', marginBottom: 8,
+                    background: track.bg,
+                    border: `1px solid ${track.color}33`,
+                    borderRadius: 10,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>{track.emoji}</span>
+                  <h2 style={{
+                    margin: 0, fontSize: 15, fontWeight: 700,
+                    color: track.color, letterSpacing: '-0.01em', flex: 1,
+                  }}>
+                    {track.name}
+                  </h2>
+                  {track.projects.length > 0 ? (
+                    <>
+                      <span style={{ fontSize: 11, color: track.color, fontWeight: 600 }}>
+                        {track.projects.length}개 프로젝트
+                      </span>
+                      <span style={{ fontSize: 11, color: '#8B95A1' }}>
+                        · {track.done}/{track.total} ({track.pct}%)
+                      </span>
+                      {track.overdue > 0 && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 100,
+                          background: '#FDE8E8', color: '#B84848', border: '1px solid #F0C4C4',
+                        }}>
+                          지연 {track.overdue}
+                        </span>
+                      )}
+                      {track.atRisk > 0 && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 600, padding: '1px 7px', borderRadius: 100,
+                          background: '#FFF4E0', color: '#8B5A2A', border: '1px solid #E8A04C',
+                        }}>
+                          임박 {track.atRisk}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <span style={{ fontSize: 11, color: '#8B95A1', fontStyle: 'italic' }}>
+                      비어 있음 — 첫 프로젝트를 추가해보세요
+                    </span>
+                  )}
+                  <span style={{
+                    fontSize: 12, color: track.color, marginLeft: 4,
+                    transform: isCollapsed ? 'rotate(0)' : 'rotate(90deg)',
+                    transition: 'transform .2s',
+                  }}>▸</span>
+                </div>
+
+                {/* Track body */}
+                {!isCollapsed && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 4 }}>
+                    {track.projects.map(proj => (
+                      <ProjectCard
+                        key={proj.name}
+                        project={proj}
+                        allPipelines={allPipelineNames}
+                        expanded={expandedProjects.has(proj.name)}
+                        onToggle={() => toggleExpand(proj.name)}
+                        onUpdate={updateTask}
+                        onCreate={createTask}
+                        onDelete={deleteTask}
+                        onRenamePipeline={renamePipeline}
+                      />
+                    ))}
+                    {/* Add new project in this track */}
+                    {isAdding ? (
+                      <NewProjectForm
+                        trackName={track.name}
+                        onCancel={() => setAddingProjectInTrack(null)}
+                        onCreate={(projName, taskTitle, deadline, stage) => {
+                          createTask(projName, {
+                            title: taskTitle,
+                            deadline: deadline || null,
+                            stage: stage || null,
+                            category: track.name,
+                          });
+                          setAddingProjectInTrack(null);
+                        }}
+                      />
+                    ) : (
+                      <button
+                        onClick={() => setAddingProjectInTrack(track.name)}
+                        style={{
+                          padding: '10px 14px',
+                          background: 'transparent',
+                          border: `1px dashed ${track.color}66`,
+                          borderRadius: 8,
+                          color: track.color,
+                          fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                          textAlign: 'left',
+                        }}
+                      >
+                        + 새 프로젝트 ({track.name})
+                      </button>
+                    )}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+
           {/* Unassigned tasks as a pseudo-project */}
           {projects.unassigned.length > 0 && (
             <UnassignedCard
@@ -1002,6 +1167,107 @@ function UnassignedCard({ tasks, allPipelines, expanded, onToggle, onUpdate, onD
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function NewProjectForm({ trackName, onCancel, onCreate }: {
+  trackName: string;
+  onCancel: () => void;
+  onCreate: (projName: string, taskTitle: string, deadline: string, stage: string) => void;
+}) {
+  const [projName, setProjName] = useState('');
+  const [taskTitle, setTaskTitle] = useState('');
+  const [date, setDate] = useState('');
+  const [stage, setStage] = useState('');
+
+  const submit = () => {
+    if (!projName.trim() || !taskTitle.trim()) return;
+    onCreate(projName.trim(), taskTitle.trim(), date, stage);
+  };
+
+  return (
+    <div style={{
+      padding: '12px 14px',
+      background: '#FAF6EF',
+      border: '1.5px solid #5F4B82',
+      borderRadius: 10,
+      display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      <div style={{ fontSize: 11, color: '#8B95A1', fontWeight: 600 }}>
+        새 프로젝트 in {trackName}
+      </div>
+      <input
+        autoFocus
+        value={projName}
+        onChange={(e) => setProjName(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Escape') onCancel(); }}
+        placeholder="프로젝트 이름 (예: 자체 채널, 씨딩, 사우나 컨택…)"
+        style={{
+          padding: '8px 10px', border: '1px solid #DDD3C2', borderRadius: 6,
+          background: '#FFF', fontSize: 13, color: '#1A1613', outline: 'none',
+          fontFamily: 'inherit',
+        }}
+      />
+      <div style={{ display: 'flex', gap: 6 }}>
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          style={{
+            flexShrink: 0, width: 130, padding: '6px 8px',
+            border: '1px solid #DDD3C2', borderRadius: 6,
+            background: '#FFF', fontSize: 12, color: '#1A1613', outline: 'none',
+          }}
+        />
+        <select
+          value={stage}
+          onChange={(e) => setStage(e.target.value)}
+          style={{
+            flexShrink: 0, width: 80, padding: '6px 8px',
+            border: '1px solid #DDD3C2', borderRadius: 6,
+            background: '#FFF', fontSize: 12, color: '#1A1613', outline: 'none',
+          }}
+        >
+          <option value="">단계</option>
+          {STAGE_ORDER.filter(Boolean).map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <input
+          value={taskTitle}
+          onChange={(e) => setTaskTitle(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit();
+            if (e.key === 'Escape') onCancel();
+          }}
+          placeholder="첫 할 일 제목 (예: 컨택 메시지 초안)"
+          style={{
+            flex: 1, padding: '6px 10px', border: '1px solid #DDD3C2', borderRadius: 6,
+            background: '#FFF', fontSize: 12, color: '#1A1613', outline: 'none',
+            fontFamily: 'inherit',
+          }}
+        />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6 }}>
+        <button
+          onClick={onCancel}
+          style={{
+            fontSize: 11, fontWeight: 500, padding: '6px 12px',
+            background: '#F2F4F6', color: '#4E5968',
+            border: '1px solid #E5E8EB', borderRadius: 6, cursor: 'pointer',
+          }}
+        >취소</button>
+        <button
+          onClick={submit}
+          disabled={!projName.trim() || !taskTitle.trim()}
+          style={{
+            fontSize: 11, fontWeight: 600, padding: '6px 14px',
+            background: !projName.trim() || !taskTitle.trim() ? '#D1D6DB' : '#191F28',
+            color: '#FFF',
+            border: 'none', borderRadius: 6,
+            cursor: !projName.trim() || !taskTitle.trim() ? 'not-allowed' : 'pointer',
+          }}
+        >만들기</button>
+      </div>
     </div>
   );
 }
