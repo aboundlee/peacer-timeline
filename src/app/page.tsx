@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { supabase, dbToApp, appToDb } from '@/lib/supabase';
 import { CATS, CC, STS, SL, SC, OWNERS, MST, OKR, PROJECT_META, TRACKS, CUSTOMER_GOAL, LEGACY_PROJECT_MAP, LEGACY_CAT_MAP, dU, fD, uid, type Phase } from '@/lib/constants';
 import DependencyGraph from './DependencyGraph';
+import LaunchTimelineV1 from './LaunchTimelineV1';
 import { calcCriticalPath, AppTask } from '@/lib/criticalPath';
 
 // ═══════════════════════════════════════════════════
@@ -1361,6 +1362,9 @@ function DashboardView({
 
   return (
     <div style={{ margin: '0 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+
+      {/* ═══ V1 출시 시나리오 타임라인 ═══ */}
+      <LaunchTimelineV1 />
 
       {/* ═══ Hero — outcome-first (v14) ═══ */}
       <div style={{ background: '#FFFFFF', border: '1px solid #E5E8EB', borderRadius: 10, padding: '14px 16px' }}>
